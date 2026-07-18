@@ -3,6 +3,8 @@ package dev.cannoli.scorza.settings
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -75,5 +77,13 @@ class SettingsRepositoryTest {
 
         settings.language = ""
         assertEquals("en", settings.language)
+    }
+
+    @Test fun `dual-screen launching defaults off and can be enabled`() {
+        val settings = newRepo()
+
+        assertFalse(settings.dualScreenLaunching)
+        settings.dualScreenLaunching = true
+        assertTrue(settings.dualScreenLaunching)
     }
 }
