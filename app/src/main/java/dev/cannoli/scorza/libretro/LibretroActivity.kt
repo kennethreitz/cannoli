@@ -87,6 +87,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     @Inject lateinit var activeMappingHolder: dev.cannoli.scorza.input.runtime.ActiveMappingHolder
     @Inject lateinit var controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
     @Inject lateinit var bindingController: dev.cannoli.scorza.input.BindingController
+    @Inject lateinit var launchState: dev.cannoli.scorza.launcher.LaunchState
 
     private lateinit var runner: LibretroRunner
     private lateinit var renderer: LibretroRenderer
@@ -2916,6 +2917,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
         dev.cannoli.scorza.util.LogWriter.flush(LOG_FLUSH_TIMEOUT_MS)
         isRunning = false
+        launchState.markGameEnded()
         if (::controllerBridge.isInitialized) {
             controllerBridge.onDeviceAdded = null
             controllerBridge.onDeviceRemoved = null
