@@ -24,7 +24,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -57,6 +61,7 @@ import dev.cannoli.scorza.launcher.ActivityDisplayRouter
 import dev.cannoli.scorza.launcher.BlackGameScreenActivity
 import dev.cannoli.scorza.launcher.ExternalGameSessionActivity
 import dev.cannoli.scorza.launcher.LaunchManager
+import dev.cannoli.scorza.launcher.launcherDimOverlayAlpha
 import dev.cannoli.scorza.launcher.noAnimationActivityOptions
 import dev.cannoli.scorza.launcher.shouldBlankGameScreen
 import dev.cannoli.scorza.launcher.shouldDimLauncherScreen
@@ -81,8 +86,6 @@ import dev.cannoli.scorza.updater.UpdateManager
 import dev.cannoli.ui.theme.CannoliTheme
 import javax.inject.Inject
 import javax.inject.Provider
-
-private const val DIMMED_LAUNCHER_BRIGHTNESS = 0.05f
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity(), ActivityActions {
@@ -152,6 +155,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
     private var coldStart = true
     private var launcherInputBlocked = false
+    private var launcherDimmed by mutableStateOf(false)
 
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -192,7 +196,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         // so the system display timeout applies. The IGM activity manages its own flag.
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         lifecycleScope.launch {
-            launchState.gameActive.collect(::syncLauncherBrightness)
+            launchState.gameActive.collect(::syncLauncherDimming)
         }
 
         @Suppress("DEPRECATION")
@@ -227,14 +231,24 @@ class MainActivity : ComponentActivity(), ActivityActions {
             LaunchedEffect(boot) {
                 if (boot is BootState.Ready) {
                     syncBlackGameScreen()
-                    syncLauncherBrightness()
+                    syncLauncherDimming()
                 }
             }
             val appSettings = if (boot is BootState.Ready) settingsViewModel.get().appSettings.collectAsState().value else null
             val themeFont = appSettings?.fontFamily ?: appFonts.mplus1Code
             dev.cannoli.scorza.i18n.ProvideLocalizedResources(appSettings?.languageTag) {
             CannoliTheme(fontFamily = themeFont, iconFontFamily = appFonts.mplus1Code) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                val dimOverlayAlpha = launcherDimOverlayAlpha(launcherDimmed)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawWithContent {
+                            drawContent()
+                            if (dimOverlayAlpha > 0f) {
+                                drawRect(Color.Black, alpha = dimOverlayAlpha)
+                            }
+                        }
+                ) {
                     CompositionLocalProvider(
                         LocalViewportInsets provides ViewportInsetsPx(
                             geometryWidthPct = settings.screenGeometryWidth,
@@ -384,7 +398,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         // This callback runs synchronously before BootSequencer exposes its Initializing state,
         // so the idle game display is already black when the library animation begins.
         syncBlackGameScreen()
-        syncLauncherBrightness()
+        syncLauncherDimming()
         if (settings.sdCardRoot.isNotEmpty()) {
             dev.cannoli.scorza.util.InputLog.init(settings.sdCardRoot)
         }
@@ -426,7 +440,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume()
-        syncLauncherBrightness()
+        syncLauncherDimming()
         // Re-wire the dispatcher to launcher dispatch shape on each resume. LibretroActivity
         // overwrites these callbacks with IGM-specific wiring when it runs; we restore the
         // launcher's wiring when we come back.
@@ -469,7 +483,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         settings.reload()
         settingsViewModel.get().load()
         syncBlackGameScreen()
-        syncLauncherBrightness()
+        syncLauncherDimming()
         val activeDialogState = nav.dialogState
         if (activeDialogState.value is DialogState.RAAccount && settings.raToken.isEmpty()) {
             activeDialogState.value = DialogState.None
@@ -774,12 +788,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
         moveLauncherToPreferredDisplay(forcePrimaryWhenDisabled = true)
         window.decorView.post {
             syncBlackGameScreen()
-            syncLauncherBrightness()
+            syncLauncherDimming()
         }
     }
 
     @Suppress("DEPRECATION")
-    private fun syncLauncherBrightness(gameActive: Boolean = launchState.gameActive.value) {
+    private fun syncLauncherDimming(gameActive: Boolean = launchState.gameActive.value) {
         val launcherDisplayId = windowManager.defaultDisplay.displayId
         val dim = shouldDimLauncherScreen(
             experimentalFeatures = settings.experimentalFeatures,
@@ -789,17 +803,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
             gameDisplayId = activityDisplayRouter.gameLaunchDisplayId(),
             launcherDisplayId = launcherDisplayId,
         )
+        launcherDimmed = dim
         updateLauncherInputBlock(dim)
-        val targetBrightness = if (dim) {
-            DIMMED_LAUNCHER_BRIGHTNESS
-        } else {
-            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        }
-        if (window.attributes.screenBrightness == targetBrightness) return
-
-        window.attributes = window.attributes.apply {
-            screenBrightness = targetBrightness
-        }
     }
 
     private fun updateLauncherInputBlock(blocked: Boolean) {
