@@ -7,6 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.launcher.ActivityDisplayRouter
 import dev.cannoli.scorza.launcher.ApkLauncher
 import dev.cannoli.scorza.launcher.DelfinoLauncher
 import dev.cannoli.scorza.launcher.EmuLauncher
@@ -26,7 +27,12 @@ object LaunchModule {
     fun provideRetroArchLauncher(
         @ApplicationContext context: Context,
         settings: SettingsRepository,
-    ): RetroArchLauncher = RetroArchLauncher(context) { settings.retroArchPackage }
+        activityDisplayRouter: ActivityDisplayRouter,
+    ): RetroArchLauncher = RetroArchLauncher(
+        context,
+        { settings.retroArchPackage },
+        activityDisplayRouter,
+    )
 
     @Provides @Singleton
     fun provideDelfinoLauncher(
@@ -45,11 +51,12 @@ object LaunchModule {
         launchState: LaunchState,
         activeMappingHolder: dev.cannoli.scorza.input.runtime.ActiveMappingHolder,
         atomicRename: AtomicRename,
+        activityDisplayRouter: ActivityDisplayRouter,
         installedCoreService: InstalledCoreService,
         gameOverrides: dev.cannoli.scorza.db.GameOverrideStore,
     ): LaunchManager = LaunchManager(
         context, settings, platformConfig,
         retroArchLauncher, emuLauncher, apkLauncher, delfinoLauncher, launchState, activeMappingHolder,
-        atomicRename, installedCoreService, gameOverrides
+        atomicRename, activityDisplayRouter, installedCoreService, gameOverrides,
     )
 }

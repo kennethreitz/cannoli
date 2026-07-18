@@ -1,6 +1,5 @@
 package dev.cannoli.scorza.launcher
 
-import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,6 +23,7 @@ import dev.cannoli.scorza.model.Rom
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.ui.screens.DialogState
 import dev.cannoli.scorza.util.ArchiveExtractor
+import dev.cannoli.scorza.util.LaunchLog
 import dev.cannoli.scorza.util.parseM3uDiscPaths
 import java.io.File
 import java.io.IOException
@@ -41,6 +41,7 @@ class LaunchManager(
     private val launchState: LaunchState,
     private val activeMappingHolder: dev.cannoli.scorza.input.runtime.ActiveMappingHolder,
     private val atomicRename: dev.cannoli.scorza.util.AtomicRename,
+    private val activityDisplayRouter: ActivityDisplayRouter,
     private val installedCoreService: InstalledCoreService? = null,
     private val gameOverrides: dev.cannoli.scorza.db.GameOverrideStore? = null,
 ) {
@@ -266,7 +267,10 @@ class LaunchManager(
 
     fun launchRom(rom: Rom): DialogState? {
         debugLog("launchRom entered: ${rom.platformTag} / ${rom.path.name} target=${rom.launchTarget::class.simpleName}")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("launchRom ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
         launchState.lastLaunched = rom
         val launchFile = resolveLaunchFile(rom, extractArchives = false)
@@ -384,12 +388,16 @@ class LaunchManager(
             }
         }
 
+        debugLog("launchRom result=${result::class.simpleName}")
         return launchResultDialog(result, rom.platformTag)
     }
 
     fun launchApp(app: App): DialogState? {
         debugLog("launchApp entered: ${app.type} / ${app.packageName}")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("launchApp ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
         return launchResultDialog(apkLauncher.launch(app.packageName))
     }
@@ -398,7 +406,10 @@ class LaunchManager(
 
     fun resumeRom(rom: Rom, resumeSlot: Int): DialogState? {
         debugLog("resumeRom entered: ${rom.platformTag} / ${rom.path.name} slot=$resumeSlot")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("resumeRom ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
         launchState.lastLaunched = rom
         val embeddedCorePath = getEmbeddedCorePath(rom)
@@ -453,6 +464,7 @@ class LaunchManager(
             val raConfig = "/storage/emulated/0/Android/data/$raPackage/files/retroarch.cfg"
             retroArchLauncher.launchRetroArchIntent(launchFile, core, raConfig, raPackage)
         }
+        debugLog("resumeRom result=${result::class.simpleName}")
         return launchResultDialog(result, rom.platformTag, rom.id)
     }
 
@@ -464,7 +476,10 @@ class LaunchManager(
 
     private fun launchResultDialog(result: LaunchResult, platformTag: String? = null, romId: Long? = null): DialogState? {
         val dialog = toLaunchDialog(result, platformTag, romId)
-        if (dialog != null) launchState.launching = false
+        // startActivity has either accepted or rejected the request at this point. Do not wait
+        // for MainActivity.onResume to release the guard: on multi-display Android both the
+        // launcher and game activities can remain resumed at the same time.
+        launchState.launching = false
         return dialog
     }
 
@@ -487,6 +502,9 @@ class LaunchManager(
     private var debugSinkRoot: String? = null
 
     private fun debugLog(message: String) {
+        // Always-on launch.log is what makes a dual-screen handoff diagnosable when session
+        // logging is off. The session sink stays for the longer launch_debug.log trail.
+        LaunchLog.write(message)
         if (!dev.cannoli.scorza.util.LoggingPrefs.session) return
         try {
             val root = settings.sdCardRoot
@@ -545,12 +563,23 @@ class LaunchManager(
         )
         val intent = args.writeTo(Intent(context, LibretroActivity::class.java))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val opts = ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
-        return try {
-            context.startActivity(intent, opts)
-            null
-        } catch (t: Throwable) {
-            errorAndReset(DialogState.LaunchError(context.getString(dev.cannoli.scorza.R.string.launch_error_generic)))
+        val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
+        val result = context.startActivityNoAnim(
+            intent,
+            context.getString(dev.cannoli.scorza.R.string.launch_error_generic),
+            gameDisplayId,
+            logLabel = "embedded",
+        )
+        return if (result == LaunchResult.Success) {
+            debugLog("embedded accepted display=$gameDisplayId")
+            launchResultDialog(result)
+        } else {
+            errorAndReset(
+                DialogState.LaunchError(
+                    (result as? LaunchResult.Error)?.message
+                        ?: context.getString(dev.cannoli.scorza.R.string.launch_error_generic)
+                )
+            )
         }
     }
 

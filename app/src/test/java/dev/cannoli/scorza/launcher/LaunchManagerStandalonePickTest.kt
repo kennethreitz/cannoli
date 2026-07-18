@@ -67,6 +67,7 @@ class LaunchManagerStandalonePickTest {
             launchState = mockk(relaxed = true),
             activeMappingHolder = activeMappingHolder,
             atomicRename = mockk(relaxed = true),
+            activityDisplayRouter = mockk(relaxed = true),
             gameOverrides = gameOverrides,
         )
     }
