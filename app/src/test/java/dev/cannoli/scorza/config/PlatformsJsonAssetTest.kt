@@ -87,4 +87,15 @@ class PlatformsJsonAssetTest {
             hub.intentFlags,
         )
     }
+
+    @Test fun `Citra MMJ uses its exported game path launch contract`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val pc = PlatformConfig(File(ctx.cacheDir, "citra-mmj-root"), ctx.assets)
+        val config = pc.getAppOptions("3DS").first { it.packageName == "org.citra.emu" }
+
+        assertEquals("org.citra.emu.ui.EmulationActivity", config.activity)
+        assertEquals(1, config.extras.size)
+        assertEquals("GamePath", config.extras.single().key)
+        assertEquals(ExtraValueKind.FILE_PATH, config.extras.single().kind)
+    }
 }

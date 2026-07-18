@@ -401,7 +401,8 @@
   "3DS": {
     "name": "Nintendo 3DS",
     "app": [
-      { "package": "org.azahar_emu.azahar", "activity": "org.citra.citra_emu.activities.EmulationActivity", "data": { "kind": "file_provider" }, "intentFlags": 268468224 }
+      { "package": "org.azahar_emu.azahar", "activity": "org.citra.citra_emu.activities.EmulationActivity", "data": { "kind": "file_provider" }, "intentFlags": 268468224 },
+      { "package": "org.citra.emu", "activity": "org.citra.emu.ui.EmulationActivity", "extras": [{ "key": "GamePath", "kind": "path" }] }
     ]
   },
   "WIIU": {

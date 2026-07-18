@@ -645,6 +645,7 @@ class PlatformConfig(
         "dev.cannoli.delfino" to "Delfino",
         "dev.cannoli.delfino.debug" to "Delfino (Debug)",
         "org.azahar_emu.azahar" to "Azahar",
+        "org.citra.emu" to "Citra MMJ",
         "info.cemu.cemu" to "Cemu",
         "org.vita3k.emulator" to "Vita3K",
         "aenu.aps3e" to "aPS3e",
