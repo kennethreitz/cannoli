@@ -151,6 +151,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var missingBios by mutableStateOf<List<dev.cannoli.scorza.config.FirmwareEntry>>(emptyList())
 
     private val screenStack = mutableStateListOf<IGMScreen>()
+    private var inputActivityResumed = false
 
     private var selectedSlotIndex by mutableIntStateOf(0)
     private var slotThumbnail by mutableStateOf<Bitmap?>(null)
@@ -485,10 +486,14 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         )
     }
 
-    private fun push(screen: IGMScreen) { screenStack.add(screen) }
+    private fun push(screen: IGMScreen) {
+        screenStack.add(screen)
+        syncMenuNavigationPolling()
+    }
 
     private fun pop() {
         if (screenStack.isNotEmpty()) screenStack.removeAt(screenStack.lastIndex)
+        syncMenuNavigationPolling()
     }
 
     private fun replaceTop(screen: IGMScreen) {
@@ -1431,13 +1436,17 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     /**
      * Wires the shared InputDispatcher's canonical-event callbacks for IGM dispatch. The IGM has
-     * no dialog precedence layer, so the helper is called with dialogHandler = null. Every IGM
-     * screen registers a handler via ScreenInput in setContent (see igmHandlerFor); the registry's
-     * top is always the active IGM screen's handler.
+     * no dialog precedence layer, so the helper is called with dialogHandler = null. Resolve the
+     * handler directly from this Activity's screen stack: the registry is process-wide, and the
+     * launcher remains composed on the other display while a game runs.
      */
     private fun wireDispatcherForIGM() {
         inputDispatcher.wireToRegistry(
             dialogHandler = null,
+            screenResolver = {
+                currentScreen?.let(::igmHandlerFor)
+                    ?: dev.cannoli.scorza.input.screen.EmptyScreenInputHandler
+            },
         )
     }
 
@@ -1697,6 +1706,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     private fun closeAll() {
         screenStack.clear()
+        syncMenuNavigationPolling()
         if (::stickAutoRepeat.isInitialized) stickAutoRepeat.stop()
         for (set in portPressedKeys) set.clear()
         triggerL2HeldDevices.clear()
@@ -2836,12 +2846,13 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     override fun onPause() {
         super.onPause()
+        inputActivityResumed = false
         if (::sessionLog.isInitialized) sessionLog.log("onPause")
         if (!loading && !cleaned && screenStack.isEmpty()) openMenu()
         stopVsyncPacer()
         glSurfaceView?.onPause()
         if (!loading && !cleaned && sramPath.isNotEmpty()) { File(sramPath).parentFile?.mkdirs(); runner.saveSRAM(sramPath) }
-        if (::menuNavigationPoller.isInitialized) menuNavigationPoller.stop()
+        syncMenuNavigationPolling()
         // Cancel any in-flight stick auto-repeat so it does not keep firing dispatcher callbacks
         // after MainActivity has rewired them.
         if (::stickAutoRepeat.isInitialized) stickAutoRepeat.stop()
@@ -2869,11 +2880,12 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume(); overridePendingTransition(0, 0); glSurfaceView?.onResume(); startVsyncPacer(); goFullscreen()
+        inputActivityResumed = true
         if (::sessionLog.isInitialized) sessionLog.log("onResume")
         autoSavedOnStop = false
         if (::inputDispatcher.isInitialized) {
             wireDispatcherForIGM()
-            menuNavigationPoller.start()
+            syncMenuNavigationPolling()
         }
         if (::controllerBridge.isInitialized) {
             controllerBridge.onDeviceAdded = { device ->
@@ -2900,6 +2912,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     runner.setControllerPortDevice(port, LibretroRunner.DEVICE_NONE)
                 }
             }
+        }
+    }
+
+    private fun syncMenuNavigationPolling() {
+        if (!::menuNavigationPoller.isInitialized) return
+        if (shouldPollInGameMenuNavigation(screenStack.isNotEmpty(), inputActivityResumed)) {
+            menuNavigationPoller.start()
+        } else {
+            menuNavigationPoller.stop()
         }
     }
 
