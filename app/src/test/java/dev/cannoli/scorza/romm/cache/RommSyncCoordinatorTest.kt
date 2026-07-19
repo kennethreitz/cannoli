@@ -2,6 +2,7 @@ package dev.cannoli.scorza.romm.cache
 
 import dev.cannoli.scorza.romm.PlatformMap
 import dev.cannoli.scorza.romm.RommClient
+import dev.cannoli.scorza.romm.RommPlatform
 import dev.cannoli.scorza.romm.RommSlugMap
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -138,6 +139,42 @@ class RommSyncCoordinatorTest {
         coordinator().syncDelta()
 
         assertEquals("2024-05-05T00:00:00", db.getSyncState("cursor"))
+    }
+
+    @Test fun `delta repairs a rom skipped by an older cursor`() = runBlocking {
+        db.replacePlatforms(
+            listOf(
+                RommPlatform(1, "snes", "SNES", "SNES", romCount = 0) to
+                    "2024-01-01T00:00:00",
+            ),
+        )
+        db.setSyncState("cursor", "2024-06-06T00:00:00")
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path!!
+                return when {
+                    path.startsWith("/api/platforms/identifiers") -> json("[1]")
+                    path.startsWith("/api/platforms") -> json(
+                        """[{"id":1,"slug":"snes","rom_count":1,"display_name":"SNES","updated_at":"2024-01-01T00:00:00"}]""",
+                    )
+                    path.startsWith("/api/roms/identifiers") -> json("[10]")
+                    path.startsWith("/api/roms") && path.contains("updated_after") ->
+                        json("""{"items":[],"total":0,"limit":100,"offset":0}""")
+                    path.startsWith("/api/roms") -> json(
+                        """{"items":[
+                            {"id":10,"platform_id":1,"fs_name":"missed.sfc","name":"Missed Game","updated_at":"2024-05-05T00:00:00"}
+                        ],"total":1,"limit":100,"offset":0}""",
+                    )
+                    path.startsWith("/api/collections") -> json("[]")
+                    else -> json("[]")
+                }
+            }
+        }
+
+        coordinator().syncDelta()
+
+        assertEquals(setOf(10), db.cachedGameIds(1))
+        assertEquals("2024-06-06T00:00:00", db.getSyncState("cursor"))
     }
 
     @Test fun `delta reconciles deletions when cached count exceeds server rom_count`() = runBlocking {
