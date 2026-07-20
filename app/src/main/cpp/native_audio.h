@@ -5,6 +5,7 @@
 void nativeAudioInit(int32_t sampleRate, double contentFps);
 void nativeAudioWrite(const int16_t* data, int32_t frames);
 void nativeAudioSetMuted(bool muted);
+void nativeAudioSetVolume(float volume);
 void nativeAudioSetNonblock(bool nonblock);
 void nativeAudioPause();
 void nativeAudioResume();

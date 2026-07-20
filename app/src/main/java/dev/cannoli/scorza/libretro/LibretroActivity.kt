@@ -3,6 +3,7 @@ package dev.cannoli.scorza.libretro
 import android.app.UiModeManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.Bundle
@@ -232,6 +233,10 @@ class LibretroActivity : ComponentActivity() {
     }
 
     private var audioSampleRate = 0
+    private val useSoftwareVolumeWorkaround: Boolean by lazy {
+        LibretroVolumeWorkaround.applies(Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+    }
+    private var lastSoftwareVolumeIndex = -1
     private var fastForwarding by mutableStateOf(false)
     private var holdingFf = false
 
@@ -246,6 +251,28 @@ class LibretroActivity : ComponentActivity() {
         override fun run() {
             sessionLog.log("audio ${runner.getAudioDiagnostics()}")
             audioStatsHandler.postDelayed(this, 5000)
+        }
+    }
+
+    private fun syncSoftwareVolume() {
+        if (!useSoftwareVolumeWorkaround || !::runner.isInitialized) return
+        val audioManager = getSystemService(AudioManager::class.java)
+        val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        runner.setAudioVolume(LibretroVolumeWorkaround.gain(volume, maxVolume))
+        if (volume != lastSoftwareVolumeIndex) {
+            lastSoftwareVolumeIndex = volume
+            if (::sessionLog.isInitialized) {
+                sessionLog.log("audio software volume: index=$volume max=$maxVolume")
+            }
+        }
+    }
+
+    private fun scheduleSoftwareVolumeSync() {
+        // AudioService applies hardware-key changes just after PhoneWindow returns. A short
+        // delayed read avoids mirroring the previous index (most importantly, 1 instead of 0).
+        if (useSoftwareVolumeWorkaround) {
+            audioStatsHandler.postDelayed({ syncSoftwareVolume() }, 75L)
         }
     }
 
@@ -491,6 +518,10 @@ class LibretroActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Dual-display focus can make Android infer the launcher/system stream for hardware
+        // volume keys. Libretro audio is media, so keep this Activity explicitly bound to it.
+        volumeControlStream = AudioManager.STREAM_MUSIC
 
         val args = dev.cannoli.scorza.launcher.LaunchArgs.from(intent) ?: run { finish(); return }
         gameTitle = args.gameTitle.removePrefix("$STAR ")
@@ -746,6 +777,7 @@ class LibretroActivity : ComponentActivity() {
                 audioSampleRate = avInfo.sampleRate
                 sessionLog.log("audio init: requested sampleRate=${avInfo.sampleRate}")
                 runner.initAudio(avInfo.sampleRate, avInfo.fps)
+                syncSoftwareVolume()
                 runner.setAudioMuted(true)
                 if (dev.cannoli.scorza.util.LoggingPrefs.session) {
                     sessionLog.log("audio ${runner.getAudioDiagnostics()}")
@@ -1236,12 +1268,19 @@ class LibretroActivity : ComponentActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val onKeyDownCtx = if (currentScreen != null) "libretro/igm" else "libretro/game"
         dev.cannoli.scorza.util.InputLog.write("[$onKeyDownCtx onKeyDown] keyCode=$keyCode")
+        // Hardware volume controls must keep reaching Android even while the core is loading.
+        if (isSystemMediaKey(keyCode)) {
+            val handled = super.onKeyDown(keyCode, event)
+            // PhoneWindow updates STREAM_MUSIC synchronously; run after it returns so the
+            // Thor-specific native fallback sees the new index, including key repeats.
+            scheduleSoftwareVolumeSync()
+            return handled
+        }
         if (missingBios.isNotEmpty()) {
             if (resolveNavButton(keyCode, event.deviceId) == "btn_east") finish()
             return true
         }
         if (loading) return true
-        if (isSystemMediaKey(keyCode)) return super.onKeyDown(keyCode, event)
         if (currentScreen == null) return handleGameplayInput(keyCode, event)
         // All IGM screens route through the dispatcher. Buttons and Shortcuts override the
         // ScreenInputHandler.onRawKeyDown hook to capture raw deviceId/repeatCount; others
@@ -1250,8 +1289,12 @@ class LibretroActivity : ComponentActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isSystemMediaKey(keyCode)) {
+            val handled = super.onKeyUp(keyCode, event)
+            scheduleSoftwareVolumeSync()
+            return handled
+        }
         if (loading) return true
-        if (isSystemMediaKey(keyCode)) return super.onKeyUp(keyCode, event)
         if (screenStack.isNotEmpty()) {
             val cs = currentScreen
             if (cs is IGMScreen.Guide) {
@@ -3101,6 +3144,7 @@ class LibretroActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume(); overridePendingTransition(0, 0); glSurfaceView?.onResume(); startVsyncPacer(); goFullscreen()
+        syncSoftwareVolume()
         inputActivityResumed = true
         if (::sessionLog.isInitialized) sessionLog.log("onResume")
         if (autoSavedOnStop && cannoliRoot.isNotEmpty()) dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).quickResumeFile.delete()
