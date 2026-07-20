@@ -1,11 +1,19 @@
 package dev.cannoli.scorza.launcher
 
+import android.content.Intent
 import android.view.KeyEvent
 import android.view.MotionEvent
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class BlackGameScreenTest {
     @Test
     fun `black game screen is fully opt in and requires separate displays`() {
@@ -87,5 +95,45 @@ class BlackGameScreenTest {
         assertFalse(detector.onTouch(MotionEvent.ACTION_DOWN, 100f, 200f))
         assertFalse(detector.onTouch(MotionEvent.ACTION_POINTER_DOWN, 100f, 200f, pointerCount = 2))
         assertFalse(detector.onTouch(MotionEvent.ACTION_UP, 100f, 200f))
+    }
+
+    @Test
+    fun `focus handoff reorders the existing launcher without Home classification`() {
+        val intent = launcherFocusIntent(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        )
+
+        assertNull(intent.action)
+        assertFalse(intent.categories?.contains(Intent.CATEGORY_HOME) == true)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_REORDER_TO_FRONT != 0)
+        assertFalse(intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TOP != 0)
+    }
+
+    @Test
+    fun `home anchor creates a distinct launcher task when none is running`() {
+        val intent = launcherFromHomeAnchorIntent(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        )
+
+        assertEquals(Intent.ACTION_MAIN, intent.action)
+        assertTrue(intent.categories?.contains(Intent.CATEGORY_HOME) == true)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_MULTIPLE_TASK != 0)
+        assertFalse(intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK != 0)
+        assertFalse(intent.flags and Intent.FLAG_ACTIVITY_REORDER_TO_FRONT != 0)
+    }
+
+    @Test
+    fun `display relocation replaces the Home task without reparenting it`() {
+        val intent = launcherRelocationIntent(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        )
+
+        assertEquals(Intent.ACTION_MAIN, intent.action)
+        assertTrue(intent.categories?.contains(Intent.CATEGORY_HOME) == true)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK != 0)
+        assertFalse(intent.flags and Intent.FLAG_ACTIVITY_REORDER_TO_FRONT != 0)
     }
 }

@@ -75,6 +75,36 @@ class ActivityDisplayRouterTest {
         assertEquals(true, isDualScreenRoutingEnabled(true, true))
     }
 
+    @Test fun `default Home relaunched on the game display becomes a black anchor`() {
+        assertEquals(
+            true,
+            shouldUseGameDisplayHomeAnchor(
+                currentDisplayId = Display.DEFAULT_DISPLAY,
+                preferredLauncherDisplayId = 4,
+                gameDisplayId = Display.DEFAULT_DISPLAY,
+                cannoliIsDefaultHome = true,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldUseGameDisplayHomeAnchor(
+                currentDisplayId = 4,
+                preferredLauncherDisplayId = 4,
+                gameDisplayId = Display.DEFAULT_DISPLAY,
+                cannoliIsDefaultHome = true,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldUseGameDisplayHomeAnchor(
+                currentDisplayId = Display.DEFAULT_DISPLAY,
+                preferredLauncherDisplayId = 4,
+                gameDisplayId = Display.DEFAULT_DISPLAY,
+                cannoliIsDefaultHome = false,
+            ),
+        )
+    }
+
     @Test fun `Thor panel mode overrides stale Android display state`() {
         assertEquals(true, isDisplayActive(Display.DEFAULT_DISPLAY, Display.STATE_ON, 0))
         assertEquals(true, isDisplayActive(4, Display.STATE_ON, 0))
@@ -135,5 +165,32 @@ class ActivityDisplayRouterTest {
         )
 
         assertNull(selectDisplaySizeRoute(displays))
+        assertEquals(Display.DEFAULT_DISPLAY, selectSingleActiveDisplayId(displays))
+    }
+
+    @Test fun `active secondary display remains the single screen when primary is off`() {
+        val displays = listOf(
+            DisplayCandidate(
+                id = Display.DEFAULT_DISPLAY,
+                flags = 0,
+                isValid = true,
+                widthPixels = 1920,
+                heightPixels = 1080,
+                physicalAreaSquareInches = 15.0,
+                isActive = false,
+            ),
+            DisplayCandidate(
+                id = 4,
+                flags = Display.FLAG_PRESENTATION,
+                isValid = true,
+                widthPixels = 1240,
+                heightPixels = 1080,
+                physicalAreaSquareInches = 5.0,
+                isActive = true,
+            ),
+        )
+
+        assertNull(selectDisplaySizeRoute(displays))
+        assertEquals(4, selectSingleActiveDisplayId(displays))
     }
 }

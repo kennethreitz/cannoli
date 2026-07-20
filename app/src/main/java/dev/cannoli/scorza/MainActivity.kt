@@ -14,6 +14,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -41,6 +43,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import dev.cannoli.scorza.boot.BootSequencer
 import dev.cannoli.scorza.boot.BootState
 import dev.cannoli.scorza.boot.StartStorageDependentHolder
@@ -61,17 +67,22 @@ import dev.cannoli.scorza.input.runtime.ControllerBridge
 import dev.cannoli.scorza.launcher.InstalledCoreService
 import dev.cannoli.scorza.launcher.ActivityDisplayRouter
 import dev.cannoli.scorza.launcher.BlackGameScreenActivity
+import dev.cannoli.scorza.launcher.BlackScreenTapGestureDetector
 import dev.cannoli.scorza.launcher.ExternalGameSessionActivity
 import dev.cannoli.scorza.launcher.LaunchManager
 import dev.cannoli.scorza.launcher.LauncherDisplayTransition
 import dev.cannoli.scorza.launcher.launcherDimOverlayAlpha
+import dev.cannoli.scorza.launcher.launcherFromHomeAnchorIntent
+import dev.cannoli.scorza.launcher.launcherFocusIntent
 import dev.cannoli.scorza.launcher.isSystemMediaKey
 import dev.cannoli.scorza.launcher.intendedLauncherDisplayId
 import dev.cannoli.scorza.launcher.launcherDisplayTransition
+import dev.cannoli.scorza.launcher.launcherRelocationIntent
 import dev.cannoli.scorza.launcher.noAnimationActivityOptions
 import dev.cannoli.scorza.launcher.shouldBlankGameScreen
 import dev.cannoli.scorza.launcher.shouldApplyDisplayAvailabilityChange
 import dev.cannoli.scorza.launcher.shouldDimLauncherScreen
+import dev.cannoli.scorza.launcher.shouldUseGameDisplayHomeAnchor
 import dev.cannoli.scorza.launcher.setLauncherWindowInputBlocked
 import dev.cannoli.scorza.libretro.LibretroActivity
 import dev.cannoli.scorza.libretro.RetroAchievementsManager
@@ -93,12 +104,16 @@ import dev.cannoli.scorza.updater.UpdateManager
 import dev.cannoli.ui.theme.CannoliTheme
 import javax.inject.Inject
 import javax.inject.Provider
+import java.lang.ref.WeakReference
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity(), ActivityActions {
 
     companion object {
         private const val DISPLAY_CHANGE_SETTLE_MS = 250L
+        private const val HOME_ANCHOR_RESTORE_SETTLE_MS = 1_000L
+
+        private var activeFullLauncher: WeakReference<MainActivity>? = null
     }
 
     @Inject lateinit var settings: SettingsRepository
@@ -171,6 +186,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
     private var displayListenerRegistered = false
     private var secondaryDisplayModeObserverRegistered = false
     private var lastDualScreenActive: Boolean? = null
+    private var isGameDisplayHomeAnchor = false
+    private var homeAnchorTapGestureDetector: BlackScreenTapGestureDetector? = null
+    private var homeAnchorRestorePending = false
     private val displayChangeRunnable = Runnable {
         val dualScreenActive = activityDisplayRouter.isDualScreenActive
         if (!shouldApplyDisplayAvailabilityChange(
@@ -213,6 +231,18 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val preCreateDisplayRouter = EntryPointAccessors.fromApplication(
+            applicationContext,
+            MainActivityDisplayRouterEntryPoint::class.java,
+        ).activityDisplayRouter()
+        isGameDisplayHomeAnchor = shouldBecomeGameDisplayHomeAnchor(preCreateDisplayRouter)
+        if (isGameDisplayHomeAnchor) {
+            setTheme(R.style.Theme_Cannoli_GameSession)
+            super.onCreate(savedInstanceState)
+            configureGameDisplayHomeAnchor()
+            return
+        }
+
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition {
             if (!::bootSequencer.isInitialized) return@setKeepOnScreenCondition true
@@ -224,6 +254,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
             }
         }
         super.onCreate(savedInstanceState)
+        activeFullLauncher = WeakReference(this)
         lastDualScreenActive = activityDisplayRouter.isDualScreenActive
         getSystemService(DisplayManager::class.java).registerDisplayListener(
             displayListener,
@@ -495,6 +526,19 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume()
+        if (!isGameDisplayHomeAnchor && shouldBecomeGameDisplayHomeAnchor()) {
+            recreate()
+            return
+        }
+        if (isGameDisplayHomeAnchor) {
+            if (!shouldBecomeGameDisplayHomeAnchor()) {
+                recreate()
+                return
+            }
+            hideSystemUI()
+            reactivateLauncherFromHomeAnchor()
+            return
+        }
         syncLauncherDimming()
         // Re-wire the dispatcher to launcher dispatch shape on each resume. LibretroActivity
         // overwrites these callbacks with IGM-specific wiring when it runs; we restore the
@@ -551,6 +595,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
     override fun onPause() {
         super.onPause()
+        if (isGameDisplayHomeAnchor) return
         syncScheduler.stop()
         menuNavigationPoller.stop()
         // Cancel any in-flight stick auto-repeat so it does not keep firing dispatcher callbacks
@@ -573,6 +618,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (isGameDisplayHomeAnchor) {
+            reactivateLauncherFromHomeAnchor()
+            return
+        }
         if (!intent.getBooleanExtra(ExternalGameSessionActivity.EXTRA_GAME_SESSION_RETURN, false)) return
 
         launchState.launching = false
@@ -592,6 +641,11 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onDestroy() {
+        if (isGameDisplayHomeAnchor) {
+            super.onDestroy()
+            return
+        }
+        if (activeFullLauncher?.get() === this) activeFullLauncher = null
         displayChangeHandler.removeCallbacks(displayChangeRunnable)
         if (displayListenerRegistered) {
             getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
@@ -609,7 +663,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
         loginPollHandler.removeCallbacks(loginPollRunnable)
         loginManager?.destroy()
         loginManager = null
-        settings.shutdown()
+        // SettingsRepository is application-scoped and must survive display relocation, which
+        // replaces MainActivity's task. Flush pending writes without stopping its worker thread.
+        settings.flush()
         if (isReady) {
             systemListViewModel.get().close()
             gameListViewModel.get().close()
@@ -617,11 +673,27 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val detector = homeAnchorTapGestureDetector
+        if (isGameDisplayHomeAnchor && detector != null && detector.onTouch(
+                actionMasked = event.actionMasked,
+                x = event.x,
+                y = event.y,
+                pointerCount = event.pointerCount,
+            )
+        ) {
+            window.decorView.post(::reactivateLauncherFromHomeAnchor)
+        }
         return true
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (isSystemMediaKey(event.keyCode)) return super.dispatchKeyEvent(event)
+        if (isGameDisplayHomeAnchor) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                window.decorView.post(::reactivateLauncherFromHomeAnchor)
+            }
+            return true
+        }
         if (launcherInputBlocked) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             dev.cannoli.scorza.util.InputLog.write(
@@ -837,6 +909,75 @@ class MainActivity : ComponentActivity(), ActivityActions {
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
+    @Suppress("DEPRECATION")
+    private fun shouldBecomeGameDisplayHomeAnchor(
+        displayRouter: ActivityDisplayRouter = activityDisplayRouter,
+    ): Boolean =
+        shouldUseGameDisplayHomeAnchor(
+            currentDisplayId = windowManager.defaultDisplay.displayId,
+            preferredLauncherDisplayId = displayRouter.preferredLauncherDisplayId(),
+            gameDisplayId = displayRouter.gameLaunchDisplayId(),
+            cannoliIsDefaultHome = isCannoliDefaultHome(),
+        )
+
+    private fun configureGameDisplayHomeAnchor() {
+        homeAnchorTapGestureDetector = BlackScreenTapGestureDetector(
+            ViewConfiguration.get(this).scaledTouchSlop.toFloat()
+        )
+        window.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
+            clearFlags(
+                WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+        setContentView(View(this).apply { setBackgroundColor(android.graphics.Color.BLACK) })
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() = reactivateLauncherFromHomeAnchor()
+            },
+        )
+        hideSystemUI()
+        window.decorView.post(::reactivateLauncherFromHomeAnchor)
+    }
+
+    private fun reactivateLauncherFromHomeAnchor() {
+        val launcherDisplayId = activityDisplayRouter.preferredLauncherDisplayId() ?: return
+        @Suppress("DEPRECATION")
+        if (launcherDisplayId == windowManager.defaultDisplay.displayId) return
+        val runningLauncher = activeFullLauncher?.get()?.takeIf { activity ->
+            !activity.isFinishing &&
+                !activity.isDestroyed &&
+                activity.windowManager.defaultDisplay.displayId == launcherDisplayId
+        }
+        if (runningLauncher == null && homeAnchorRestorePending) return
+        try {
+            val launcherIntent = if (runningLauncher != null) {
+                launcherFocusIntent(this)
+            } else {
+                homeAnchorRestorePending = true
+                launcherFromHomeAnchorIntent(this)
+            }
+            startActivity(
+                launcherIntent,
+                noAnimationActivityOptions(launcherDisplayId),
+            )
+            if (runningLauncher == null) {
+                window.decorView.postDelayed(
+                    { homeAnchorRestorePending = false },
+                    HOME_ANCHOR_RESTORE_SETTLE_MS,
+                )
+            }
+        } catch (e: RuntimeException) {
+            homeAnchorRestorePending = false
+            dev.cannoli.scorza.util.ErrorLog.error(
+                "home anchor launcher restore failed: display=$launcherDisplayId",
+                e,
+            )
+        }
+    }
+
     private fun unregisterCoreQueryReceiver() {
         coreQueryReceiver?.let {
             try { unregisterReceiver(it) } catch (_: IllegalArgumentException) {}
@@ -975,11 +1116,11 @@ class MainActivity : ComponentActivity(), ActivityActions {
         ) ?: return
         if (windowManager.defaultDisplay.displayId == targetDisplayId) return
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-        }
         try {
-            startActivity(intent, noAnimationActivityOptions(targetDisplayId))
+            startActivity(
+                launcherRelocationIntent(this),
+                noAnimationActivityOptions(targetDisplayId),
+            )
         } catch (e: RuntimeException) {
             dev.cannoli.scorza.util.ErrorLog.error(
                 "launcher display move failed: display=$targetDisplayId",
@@ -1116,4 +1257,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
         dev.cannoli.scorza.romm.PairingFailure.FAILED -> getString(R.string.romm_pair_failed)
     }
 
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+internal interface MainActivityDisplayRouterEntryPoint {
+    fun activityDisplayRouter(): ActivityDisplayRouter
 }

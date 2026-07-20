@@ -62,6 +62,16 @@ internal fun isDualScreenRoutingEnabled(
     dualScreenLaunching: Boolean,
 ): Boolean = experimentalFeatures && dualScreenLaunching
 
+internal fun shouldUseGameDisplayHomeAnchor(
+    currentDisplayId: Int,
+    preferredLauncherDisplayId: Int?,
+    gameDisplayId: Int?,
+    cannoliIsDefaultHome: Boolean,
+): Boolean = cannoliIsDefaultHome &&
+    preferredLauncherDisplayId != null &&
+    gameDisplayId == currentDisplayId &&
+    preferredLauncherDisplayId != currentDisplayId
+
 internal fun isDisplayActive(
     displayId: Int,
     displayState: Int,
@@ -105,6 +115,13 @@ internal fun selectDisplaySizeRoute(displays: List<DisplayCandidate>): DisplaySi
         gameDisplayId = ranked.last().id,
     )
 }
+
+internal fun selectSingleActiveDisplayId(displays: List<DisplayCandidate>): Int? =
+    displays.singleOrNull {
+        it.isValid &&
+            it.isActive &&
+            it.flags and Display.FLAG_PRIVATE == 0
+    }?.id
 
 fun Context.noAnimationActivityOptions(launchDisplayId: Int? = null): Bundle =
     ActivityOptions.makeCustomAnimation(this, 0, 0).apply {
@@ -175,19 +192,21 @@ class ActivityDisplayRouter @Inject constructor(
     private fun displaySizeRoute(): DisplaySizeRoute? =
         selectDisplaySizeRoute(displayCandidates())
 
-    fun preferredLauncherDisplayId(forcePrimaryWhenDisabled: Boolean = false): Int? =
-        if (isRoutingEnabled) {
-            displaySizeRoute()?.launcherDisplayId ?: Display.DEFAULT_DISPLAY
-        } else {
-            Display.DEFAULT_DISPLAY.takeIf { forcePrimaryWhenDisabled }
-        }
+    fun preferredLauncherDisplayId(forcePrimaryWhenDisabled: Boolean = false): Int? {
+        if (!isRoutingEnabled) return Display.DEFAULT_DISPLAY.takeIf { forcePrimaryWhenDisabled }
+        val candidates = displayCandidates()
+        return selectDisplaySizeRoute(candidates)?.launcherDisplayId
+            ?: selectSingleActiveDisplayId(candidates)
+            ?: Display.DEFAULT_DISPLAY
+    }
 
-    fun gameLaunchDisplayId(): Int? =
-        if (isRoutingEnabled) {
-            displaySizeRoute()?.gameDisplayId ?: Display.DEFAULT_DISPLAY
-        } else {
-            null
-        }
+    fun gameLaunchDisplayId(): Int? {
+        if (!isRoutingEnabled) return null
+        val candidates = displayCandidates()
+        return selectDisplaySizeRoute(candidates)?.gameDisplayId
+            ?: selectSingleActiveDisplayId(candidates)
+            ?: Display.DEFAULT_DISPLAY
+    }
 
     fun diagnosticSummary(): String {
         val candidates = displayCandidates()
