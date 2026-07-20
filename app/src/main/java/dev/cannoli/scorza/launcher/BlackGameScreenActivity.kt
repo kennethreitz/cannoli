@@ -98,15 +98,12 @@ class BlackGameScreenActivity : ComponentActivity() {
     private fun returnFocusToLauncher() {
         val launcherDisplayId = activityDisplayRouter.preferredLauncherDisplayId() ?: return
         if (launcherDisplayId == windowManager.defaultDisplay.displayId) return
-        val launcherIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                    Intent.FLAG_ACTIVITY_NO_ANIMATION
-            )
-        }
+
         try {
-            startActivity(launcherIntent, noAnimationActivityOptions(launcherDisplayId))
+            startActivity(
+                launcherFocusIntent(this),
+                noAnimationActivityOptions(launcherDisplayId),
+            )
             window.decorView.postDelayed(::hideSystemUI, SYSTEM_UI_REHIDE_DELAY_MS)
         } catch (e: RuntimeException) {
             ErrorLog.error("black game screen focus return failed", e)
@@ -147,6 +144,37 @@ class BlackGameScreenActivity : ComponentActivity() {
             }
     }
 }
+
+internal fun launcherFocusIntent(context: Context): Intent =
+    Intent(context, MainActivity::class.java).apply {
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
+    }
+
+internal fun launcherFromHomeAnchorIntent(context: Context): Intent =
+    Intent(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_HOME)
+        setClass(context, MainActivity::class.java)
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
+    }
+
+internal fun launcherRelocationIntent(context: Context): Intent =
+    Intent(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_HOME)
+        setClass(context, MainActivity::class.java)
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
+    }
 
 internal fun shouldBlankGameScreen(
     experimentalFeatures: Boolean,
