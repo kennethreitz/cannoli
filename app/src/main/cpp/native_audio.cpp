@@ -73,6 +73,7 @@ struct AudioState : public oboe::AudioStreamDataCallback,
     std::atomic<bool> muted{false};
     std::atomic<bool> nonblock{false};
     std::atomic<bool> streamStarted{false};
+    std::atomic<float> volume{1.0f};
 
     std::atomic<uint64_t> statWrites{0};            // nativeAudioWrite calls (all)
     std::atomic<uint64_t> statFramesIn{0};          // frames pushed into FIFO
@@ -374,8 +375,14 @@ oboe::DataCallbackResult AudioState::onAudioReady(
                (size_t)(numFrames - (int32_t)outLen) * CHANNELS * sizeof(int16_t));
     }
 
-    if (muted.load(std::memory_order_relaxed)) {
+    const float volume = this->volume.load(std::memory_order_relaxed);
+    if (muted.load(std::memory_order_relaxed) || volume <= 0.0f) {
         memset(audioData, 0, (size_t)numFrames * CHANNELS * sizeof(int16_t));
+    } else if (volume < 1.0f) {
+        const int32_t sampleCount = numFrames * CHANNELS;
+        for (int32_t i = 0; i < sampleCount; ++i) {
+            out[i] = (int16_t)std::lround((float)out[i] * volume);
+        }
     }
 
     statFramesOut.fetch_add((uint64_t)numFrames, std::memory_order_relaxed);
@@ -545,6 +552,13 @@ void nativeAudioWrite(const int16_t* data, int32_t frames) {
 
 void nativeAudioSetMuted(bool muted) {
     g.muted.store(muted, std::memory_order_relaxed);
+}
+
+void nativeAudioSetVolume(float volume) {
+    if (!std::isfinite(volume)) volume = 1.0f;
+    if (volume < 0.0f) volume = 0.0f;
+    if (volume > 1.0f) volume = 1.0f;
+    g.volume.store(volume, std::memory_order_relaxed);
 }
 
 void nativeAudioSetNonblock(bool nonblock) {
