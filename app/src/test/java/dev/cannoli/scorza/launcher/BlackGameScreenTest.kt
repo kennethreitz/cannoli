@@ -111,17 +111,53 @@ class BlackGameScreenTest {
     }
 
     @Test
-    fun `home anchor creates a distinct launcher task when none is running`() {
+    fun `home anchor creates a distinct standard launcher task when none is running`() {
         val intent = launcherFromHomeAnchorIntent(
             androidx.test.core.app.ApplicationProvider.getApplicationContext()
         )
 
-        assertEquals(Intent.ACTION_MAIN, intent.action)
-        assertTrue(intent.categories?.contains(Intent.CATEGORY_HOME) == true)
+        assertNull(intent.action)
+        assertFalse(intent.categories?.contains(Intent.CATEGORY_HOME) == true)
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_MULTIPLE_TASK != 0)
         assertFalse(intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK != 0)
         assertFalse(intent.flags and Intent.FLAG_ACTIVITY_REORDER_TO_FRONT != 0)
+    }
+
+    @Test
+    fun `automatic home callbacks do not reorder an existing launcher`() {
+        assertFalse(
+            shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = true,
+                userInitiated = false,
+                restorePending = false,
+            )
+        )
+        assertTrue(
+            shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = true,
+                userInitiated = true,
+                restorePending = false,
+            )
+        )
+    }
+
+    @Test
+    fun `home anchor restores one missing launcher at a time`() {
+        assertTrue(
+            shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = false,
+                userInitiated = false,
+                restorePending = false,
+            )
+        )
+        assertFalse(
+            shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = false,
+                userInitiated = true,
+                restorePending = true,
+            )
+        )
     }
 
     @Test
