@@ -155,15 +155,23 @@ internal fun launcherFocusIntent(context: Context): Intent =
     }
 
 internal fun launcherFromHomeAnchorIntent(context: Context): Intent =
-    Intent(Intent.ACTION_MAIN).apply {
-        addCategory(Intent.CATEGORY_HOME)
-        setClass(context, MainActivity::class.java)
+    Intent(context, MainActivity::class.java).apply {
         addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
                 Intent.FLAG_ACTIVITY_NO_ANIMATION
         )
     }
+
+internal fun shouldRequestLauncherFromHomeAnchor(
+    runningLauncherAvailable: Boolean,
+    userInitiated: Boolean,
+    restorePending: Boolean,
+): Boolean = when {
+    runningLauncherAvailable -> userInitiated
+    restorePending -> false
+    else -> true
+}
 
 internal fun launcherRelocationIntent(context: Context): Intent =
     Intent(Intent.ACTION_MAIN).apply {

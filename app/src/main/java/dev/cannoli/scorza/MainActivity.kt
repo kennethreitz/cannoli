@@ -82,6 +82,7 @@ import dev.cannoli.scorza.launcher.noAnimationActivityOptions
 import dev.cannoli.scorza.launcher.shouldBlankGameScreen
 import dev.cannoli.scorza.launcher.shouldApplyDisplayAvailabilityChange
 import dev.cannoli.scorza.launcher.shouldDimLauncherScreen
+import dev.cannoli.scorza.launcher.shouldRequestLauncherFromHomeAnchor
 import dev.cannoli.scorza.launcher.shouldUseGameDisplayHomeAnchor
 import dev.cannoli.scorza.launcher.setLauncherWindowInputBlocked
 import dev.cannoli.scorza.libretro.LibretroActivity
@@ -535,6 +536,17 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 recreate()
                 return
             }
+            // The Home anchor can only resume on the game display after the game has stopped
+            // covering it. Recents/"close all" may bypass ExternalGameSessionActivity's normal
+            // return callback, so clear the session here before the launcher is focused again.
+            // Otherwise the launcher remains dimmed and FLAG_NOT_FOCUSABLE makes Android wait for
+            // a focusable window that can never appear.
+            if (launchState.gameActive.value) {
+                dev.cannoli.scorza.util.LaunchLog.write(
+                    "game display home anchor resumed; ending stale game session"
+                )
+                launchState.markGameEnded()
+            }
             hideSystemUI()
             reactivateLauncherFromHomeAnchor()
             return
@@ -679,9 +691,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 x = event.x,
                 y = event.y,
                 pointerCount = event.pointerCount,
-            )
+        )
         ) {
-            window.decorView.post(::reactivateLauncherFromHomeAnchor)
+            window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
         }
         return true
     }
@@ -690,7 +702,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         if (isSystemMediaKey(event.keyCode)) return super.dispatchKeyEvent(event)
         if (isGameDisplayHomeAnchor) {
             if (event.action == KeyEvent.ACTION_DOWN) {
-                window.decorView.post(::reactivateLauncherFromHomeAnchor)
+                window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
             }
             return true
         }
@@ -935,14 +947,15 @@ class MainActivity : ComponentActivity(), ActivityActions {
         onBackPressedDispatcher.addCallback(
             this,
             object : androidx.activity.OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() = reactivateLauncherFromHomeAnchor()
+                override fun handleOnBackPressed() =
+                    reactivateLauncherFromHomeAnchor(userInitiated = true)
             },
         )
         hideSystemUI()
         window.decorView.post(::reactivateLauncherFromHomeAnchor)
     }
 
-    private fun reactivateLauncherFromHomeAnchor() {
+    private fun reactivateLauncherFromHomeAnchor(userInitiated: Boolean = false) {
         val launcherDisplayId = activityDisplayRouter.preferredLauncherDisplayId() ?: return
         @Suppress("DEPRECATION")
         if (launcherDisplayId == windowManager.defaultDisplay.displayId) return
@@ -951,7 +964,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 !activity.isDestroyed &&
                 activity.windowManager.defaultDisplay.displayId == launcherDisplayId
         }
-        if (runningLauncher == null && homeAnchorRestorePending) return
+        if (!shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = runningLauncher != null,
+                userInitiated = userInitiated,
+                restorePending = homeAnchorRestorePending,
+            )
+        ) return
         try {
             val launcherIntent = if (runningLauncher != null) {
                 launcherFocusIntent(this)
