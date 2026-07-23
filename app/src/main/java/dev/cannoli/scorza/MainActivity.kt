@@ -96,6 +96,12 @@ import dev.cannoli.scorza.ui.LocalViewportInsets
 import dev.cannoli.scorza.ui.ViewportInsetsPx
 import dev.cannoli.scorza.ui.screens.BootErrorScreen
 import dev.cannoli.scorza.ui.screens.DialogState
+import dev.cannoli.scorza.ui.components.SotnCastleMapCompanion
+import dev.cannoli.scorza.ui.components.shouldShowSotnCastleMap
+import dev.cannoli.scorza.ui.components.PokemonFireEmeraldCompanion
+import dev.cannoli.scorza.ui.components.shouldShowPokemonFireEmeraldCompanion
+import dev.cannoli.scorza.ui.components.SuperMarioWorldCompanion
+import dev.cannoli.scorza.ui.components.shouldShowSuperMarioWorldCompanion
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
@@ -183,6 +189,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
     private var coldStart = true
     private var launcherInputBlocked = false
     private var launcherDimmed by mutableStateOf(false)
+    private var launcherSotnMapVisible by mutableStateOf(false)
+    private var launcherPokemonCompanionVisible by mutableStateOf(false)
+    private var launcherSuperMarioWorldCompanionVisible by mutableStateOf(false)
     private val displayChangeHandler = Handler(Looper.getMainLooper())
     private var displayListenerRegistered = false
     private var secondaryDisplayModeObserverRegistered = false
@@ -312,6 +321,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
         bootSequencer.advance()
 
         setContent {
+            val sotnMapSnapshot by launchState.sotnMap.collectAsState()
+            val pokemonFireEmeraldSnapshot by launchState.pokemonFireEmerald.collectAsState()
+            val superMarioWorldSnapshot by launchState.superMarioWorld.collectAsState()
             val boot by bootSequencer.state.collectAsState()
             LaunchedEffect(boot) {
                 if (boot is BootState.Ready) {
@@ -326,7 +338,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 appFonts.mplus1Code
             }
             CannoliTheme(fontFamily = themeFont, iconFontFamily = appFonts.mplus1Code) {
-                val dimOverlayAlpha = launcherDimOverlayAlpha(launcherDimmed)
+                val dimOverlayAlpha = launcherDimOverlayAlpha(
+                    launcherDimmed &&
+                        !launcherSotnMapVisible &&
+                        !launcherPokemonCompanionVisible &&
+                        !launcherSuperMarioWorldCompanionVisible
+                )
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
@@ -337,17 +354,18 @@ class MainActivity : ComponentActivity(), ActivityActions {
                             }
                         }
                 ) {
-                    CompositionLocalProvider(
-                        LocalViewportInsets provides ViewportInsetsPx(
-                            geometryWidthPct = settings.screenGeometryWidth,
-                            geometryHeightPct = settings.screenGeometryHeight,
-                            geometryXPct = settings.screenGeometryX,
-                            geometryYPct = settings.screenGeometryY,
-                            portraitMarginPx = settings.portraitMarginPx,
-                        ),
-                        dev.cannoli.scorza.input.screen.compose.LocalScreenInputRegistry provides screenInputRegistry,
-                    ) {
-                    when (val s = boot) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        CompositionLocalProvider(
+                            LocalViewportInsets provides ViewportInsetsPx(
+                                geometryWidthPct = settings.screenGeometryWidth,
+                                geometryHeightPct = settings.screenGeometryHeight,
+                                geometryXPct = settings.screenGeometryX,
+                                geometryYPct = settings.screenGeometryY,
+                                portraitMarginPx = settings.portraitMarginPx,
+                            ),
+                            dev.cannoli.scorza.input.screen.compose.LocalScreenInputRegistry provides screenInputRegistry,
+                        ) {
+                        when (val s = boot) {
                         is BootState.Resolving -> Box(modifier = Modifier.fillMaxSize()) {}
                         is BootState.NeedsPermission, is BootState.NeedsSetup -> {
                             val storageGranted = (s as? BootState.NeedsPermission)?.storageGranted ?: true
@@ -407,7 +425,15 @@ class MainActivity : ComponentActivity(), ActivityActions {
                         }
                         is BootState.Error -> BootErrorScreen(message = s.message)
                         is BootState.Ready -> ReadyNavGraph()
-                    }
+                        }
+                        }
+                        if (launcherSotnMapVisible) {
+                            SotnCastleMapCompanion(snapshot = sotnMapSnapshot)
+                        } else if (launcherPokemonCompanionVisible) {
+                            PokemonFireEmeraldCompanion(snapshot = pokemonFireEmeraldSnapshot)
+                        } else if (launcherSuperMarioWorldCompanionVisible) {
+                            SuperMarioWorldCompanion(snapshot = superMarioWorldSnapshot)
+                        }
                     }
                 }
             }
@@ -695,7 +721,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         ) {
             window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
         }
-        return true
+        return if (launcherSotnMapVisible) super.dispatchTouchEvent(event) else true
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -1047,16 +1073,46 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Suppress("DEPRECATION")
     private fun syncLauncherDimming(gameActive: Boolean = launchState.gameActive.value) {
         val launcherDisplayId = windowManager.defaultDisplay.displayId
+        val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
         val dim = shouldDimLauncherScreen(
             experimentalFeatures = settings.experimentalFeatures,
             dualScreenLaunching = settings.dualScreenLaunching,
             dimLauncherDuringGames = settings.dimLauncherDuringGames,
             gameActive = gameActive,
-            gameDisplayId = activityDisplayRouter.gameLaunchDisplayId(),
+            gameDisplayId = gameDisplayId,
             launcherDisplayId = launcherDisplayId,
         )
+        val showSotnMap = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowSotnCastleMap(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showPokemonCompanion = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowPokemonFireEmeraldCompanion(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showSuperMarioWorldCompanion = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowSuperMarioWorldCompanion(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
         launcherDimmed = dim
-        updateLauncherInputBlock(dim)
+        launcherSotnMapVisible = showSotnMap
+        launcherPokemonCompanionVisible = showPokemonCompanion
+        launcherSuperMarioWorldCompanionVisible = showSuperMarioWorldCompanion
+        updateLauncherInputBlock(
+            dim || showSotnMap || showPokemonCompanion || showSuperMarioWorldCompanion
+        )
     }
 
     private fun updateLauncherInputBlock(blocked: Boolean) {

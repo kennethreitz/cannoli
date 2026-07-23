@@ -150,6 +150,12 @@ class LibretroRunner {
 
     fun getMemoryDescriptors(): List<String> = nativeGetMemoryDescriptors().toList()
 
+    fun copyMemory(memoryId: Int, offset: Int, length: Int): ByteArray? =
+        nativeCopyMemory(memoryId, offset, length)
+
+    fun copyMappedMemory(address: Int, length: Int): ByteArray? =
+        nativeCopyMappedMemory(address, length)
+
     private external fun nativeLoadCore(corePath: String): Boolean
     private external fun nativeInit(systemDir: String, saveDir: String)
     private external fun nativeAudioInit(sampleRate: Int, contentFps: Double)
@@ -194,4 +200,6 @@ class LibretroRunner {
     private external fun nativeGetDiskLabel(index: Int): String?
     private external fun nativeGetCoreLogs(): Array<String>
     private external fun nativeGetMemoryDescriptors(): Array<String>
+    private external fun nativeCopyMemory(memoryId: Int, offset: Int, length: Int): ByteArray?
+    private external fun nativeCopyMappedMemory(address: Int, length: Int): ByteArray?
 }

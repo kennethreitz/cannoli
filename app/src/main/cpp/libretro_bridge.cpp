@@ -1001,6 +1001,60 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeLoadSRAM(JNIEnv *env, jobj
     return JNI_TRUE;
 }
 
+JNIEXPORT jbyteArray JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCopyMemory(
+        JNIEnv *env, jobject, jint memoryId, jint offset, jint length) {
+    if (!core.get_memory_data || !core.get_memory_size || offset < 0 || length < 0) {
+        return nullptr;
+    }
+    void *memory = core.get_memory_data((unsigned)memoryId);
+    size_t memory_size = core.get_memory_size((unsigned)memoryId);
+    size_t start = (size_t)offset;
+    size_t count = (size_t)length;
+    if (!memory || start > memory_size || count > memory_size - start) {
+        return nullptr;
+    }
+    jbyteArray result = env->NewByteArray(length);
+    if (!result) return nullptr;
+    env->SetByteArrayRegion(
+        result,
+        0,
+        length,
+        reinterpret_cast<const jbyte *>(static_cast<const uint8_t *>(memory) + start));
+    return result;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCopyMappedMemory(
+        JNIEnv *env, jobject, jint address, jint length) {
+    if (address < 0 || length < 0) return nullptr;
+
+    const size_t start = static_cast<size_t>(address);
+    const size_t count = static_cast<size_t>(length);
+    if (count > SIZE_MAX - start) return nullptr;
+    const size_t end = start + count;
+
+    for (unsigned i = 0; i < g_memory_descriptor_count; i++) {
+        const auto &descriptor = g_memory_descriptors[i];
+        if (!descriptor.ptr || descriptor.len > SIZE_MAX - descriptor.start) continue;
+        const size_t descriptor_end = descriptor.start + descriptor.len;
+        if (start < descriptor.start || end > descriptor_end) continue;
+        if (descriptor.offset > SIZE_MAX - (start - descriptor.start)) return nullptr;
+
+        const size_t source_offset = descriptor.offset + (start - descriptor.start);
+        jbyteArray result = env->NewByteArray(length);
+        if (!result) return nullptr;
+        env->SetByteArrayRegion(
+            result,
+            0,
+            length,
+            reinterpret_cast<const jbyte *>(
+                static_cast<const uint8_t *>(descriptor.ptr) + source_offset));
+        return result;
+    }
+    return nullptr;
+}
+
 JNIEXPORT void JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeApplyEmuCheats(JNIEnv *env, jobject, jobjectArray codes) {
     if (!core.cheat_reset || !core.cheat_set) return;

@@ -353,6 +353,10 @@ class LibretroActivity : ComponentActivity() {
     private var gameBaseName: String = ""
     private var platformName: String = ""
     private var cannoliRoot: String = ""
+    private var trackSotnMap = false
+    private var trackPokemonFireEmerald = false
+    private var trackSuperMarioWorld = false
+    private var companionFrame = 0
 
     private val currentSlot get() = slotManager.slots[selectedSlotIndex]
     private val currentScreen get() = screenStack.lastOrNull()
@@ -478,6 +482,7 @@ class LibretroActivity : ComponentActivity() {
         )
         private const val TRIGGER_PRESS_THRESHOLD = 0.5f
         private const val TRIGGER_RELEASE_THRESHOLD = 0.3f
+        private const val COMPANION_POLL_FRAMES = 15
         @Volatile var isRunning = false
 
         // Last-resort keycode -> nav button mapping for IGM nav, used only when the device
@@ -527,6 +532,9 @@ class LibretroActivity : ComponentActivity() {
         gameTitle = args.gameTitle.removePrefix("$STAR ")
         corePath = args.corePath
         romPath = args.romPath
+        trackSotnMap = SotnMapReader.matches(gameTitle, romPath)
+        trackPokemonFireEmerald = PokemonFireEmeraldReader.matches(gameTitle, romPath)
+        trackSuperMarioWorld = SuperMarioWorldReader.matches(gameTitle, romPath)
         originalRomPath = args.originalRomPath
         sramPath = args.sramPath
         stateBasePath = args.statePath
@@ -818,6 +826,25 @@ class LibretroActivity : ComponentActivity() {
                 var verticalReinitPhase = 0
                 val verticalToggle = prepareVerticalModeReinit()
                 glesBackend.onFrameRendered = {
+                    if ((trackSotnMap || trackPokemonFireEmerald || trackSuperMarioWorld) &&
+                        ++companionFrame >= COMPANION_POLL_FRAMES
+                    ) {
+                        companionFrame = 0
+                        if (trackSotnMap) {
+                            SotnMapReader.read(runner)?.let(launchState::updateSotnMap)
+                        }
+                        if (trackPokemonFireEmerald) {
+                            PokemonFireEmeraldReader.read(runner)
+                                ?.let(launchState::updatePokemonFireEmerald)
+                        }
+                        if (trackSuperMarioWorld) {
+                            SuperMarioWorldReader.read(
+                                runner,
+                                launchState.superMarioWorld.value?.currentTranslevel ?: -1,
+                            )
+                                ?.let(launchState::updateSuperMarioWorld)
+                        }
+                    }
                     if (startupCountdown > 0 && --startupCountdown == 0) {
                         runner.setAudioMuted(false)
                         sessionLog.log("startup reveal: unmute and reveal")
