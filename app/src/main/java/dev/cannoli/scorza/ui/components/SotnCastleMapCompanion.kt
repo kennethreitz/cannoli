@@ -69,7 +69,7 @@ fun SotnCastleMapCompanion(
     }
 
     val resources = LocalContext.current.resources
-    val map = remember(resources) { loadCastleMapWithTransparentBackground(resources) }
+    val maps = remember(resources) { loadCastleMaps(resources) }
     var showFullMap by remember { mutableStateOf(false) }
     val markerTransition = rememberInfiniteTransition(label = "SotN map marker")
     val markerAlpha by markerTransition.animateFloat(
@@ -95,6 +95,12 @@ fun SotnCastleMapCompanion(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 18.dp),
+        )
+        SotnPlayerProgress(
+            snapshot = readySnapshot,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 10.dp, start = 18.dp),
         )
         Column(
             modifier = Modifier
@@ -122,9 +128,14 @@ fun SotnCastleMapCompanion(
                 .padding(horizontal = 22.dp, vertical = 54.dp)
         ) {
             if (showFullMap) {
-                drawFullCastleMap(map, readySnapshot, markerAlpha)
+                drawFullCastleMap(maps.original, readySnapshot, markerAlpha)
             } else {
-                drawDiscoveredCastleMap(map, readySnapshot, markerAlpha)
+                drawDiscoveredCastleMap(
+                    map = maps.original,
+                    unexploredMap = maps.unexplored,
+                    snapshot = readySnapshot,
+                    markerAlpha = markerAlpha,
+                )
             }
         }
         Text(
@@ -142,18 +153,80 @@ fun SotnCastleMapCompanion(
     }
 }
 
-private fun loadCastleMapWithTransparentBackground(
+@Composable
+private fun SotnPlayerProgress(
+    snapshot: SotnMapSnapshot,
+    modifier: Modifier = Modifier,
+) {
+    if (snapshot.playerLevel !in 1..SotnMapSnapshot.MAX_PLAYER_LEVEL) return
+
+    Column(modifier = modifier) {
+        Text(
+            text = "ALUCARD",
+            color = Color.White.copy(alpha = 0.62f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.5.sp,
+        )
+        Text(
+            text = "LEVEL ${snapshot.playerLevel}",
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = sotnExperienceToNextText(snapshot),
+            color = Color.White.copy(alpha = 0.72f),
+            fontSize = 10.sp,
+        )
+    }
+}
+
+internal fun sotnExperienceToNextText(snapshot: SotnMapSnapshot): String =
+    when (val remaining = snapshot.experienceToNextLevel) {
+        null -> ""
+        0 -> if (snapshot.playerLevel == SotnMapSnapshot.MAX_PLAYER_LEVEL) {
+            "MAX LEVEL"
+        } else {
+            "0 XP TO NEXT"
+        }
+        else -> String.format(Locale.ROOT, "%,d XP TO NEXT", remaining)
+    }
+
+private data class CastleMapImages(
+    val original: ImageBitmap,
+    val unexplored: ImageBitmap,
+)
+
+private fun loadCastleMaps(
     resources: android.content.res.Resources,
-): ImageBitmap {
+): CastleMapImages {
     val source = BitmapFactory.decodeResource(resources, R.drawable.sotn_castle_map)
     val pixels = IntArray(source.width * source.height)
     source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+    val unexploredPixels = pixels.copyOf()
     for (index in pixels.indices) {
-        if (pixels[index] == SourceBackgroundArgb) pixels[index] = android.graphics.Color.TRANSPARENT
+        if (pixels[index] == SourceBackgroundArgb) {
+            pixels[index] = android.graphics.Color.TRANSPARENT
+            unexploredPixels[index] = android.graphics.Color.TRANSPARENT
+        } else {
+            unexploredPixels[index] = sotnUnexploredMapColor(pixels[index])
+        }
     }
-    return Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).apply {
-        setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+    return CastleMapImages(
+        original = pixels.toCastleMapBitmap(source.width, source.height),
+        unexplored = unexploredPixels.toCastleMapBitmap(source.width, source.height),
+    )
+}
+
+private fun IntArray.toCastleMapBitmap(width: Int, height: Int): ImageBitmap =
+    Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+        setPixels(this@toCastleMapBitmap, 0, width, 0, 0, width, height)
     }.asImageBitmap()
+
+internal fun sotnUnexploredMapColor(argb: Int): Int = when (argb) {
+    MapDoorArgb, MapWarpArgb -> BlueprintRoomArgb
+    else -> argb
 }
 
 private fun DrawScope.drawFullCastleMap(
@@ -199,13 +272,19 @@ private fun DrawScope.drawFullCastleMap(
 
 private fun DrawScope.drawDiscoveredCastleMap(
     map: ImageBitmap,
+    unexploredMap: ImageBitmap,
     snapshot: SotnMapSnapshot,
     markerAlpha: Float,
 ) {
-    val visited = buildList {
+    val visited = mutableListOf<Pair<Int, Int>>()
+    val mapped = buildList {
         for (tileY in SotnMapSnapshot.MAP_TILES) {
             for (tileX in SotnMapSnapshot.MAP_TILES) {
                 if (snapshot.isVisited(tileX, tileY)) {
+                    val displayTile = snapshot.toDisplayTile(tileX, tileY)
+                    visited.add(displayTile)
+                    add(displayTile)
+                } else if (snapshot.isBlueprintMapped(tileX, tileY)) {
                     add(snapshot.toDisplayTile(tileX, tileY))
                 }
             }
@@ -214,13 +293,16 @@ private fun DrawScope.drawDiscoveredCastleMap(
         if (playerDisplayTile !in this) {
             add(playerDisplayTile)
         }
+        if (playerDisplayTile !in visited) {
+            visited.add(playerDisplayTile)
+        }
     }
-    if (visited.isEmpty()) return
+    if (mapped.isEmpty()) return
 
-    val minTileX = max(0, visited.minOf { it.first } - MAP_MARGIN_TILES)
-    val maxTileX = min(63, visited.maxOf { it.first } + MAP_MARGIN_TILES)
-    val minTileY = max(0, visited.minOf { it.second } - MAP_MARGIN_TILES)
-    val maxTileY = min(63, visited.maxOf { it.second } + MAP_MARGIN_TILES)
+    val minTileX = max(0, mapped.minOf { it.first } - MAP_MARGIN_TILES)
+    val maxTileX = min(63, mapped.maxOf { it.first } + MAP_MARGIN_TILES)
+    val minTileY = max(0, mapped.minOf { it.second } - MAP_MARGIN_TILES)
+    val maxTileY = min(63, mapped.maxOf { it.second } + MAP_MARGIN_TILES)
     val tileSize = min(
         size.width / (maxTileX - minTileX + 1),
         size.height / (maxTileY - minTileY + 1),
@@ -231,8 +313,26 @@ private fun DrawScope.drawDiscoveredCastleMap(
     val sourceTop = if (snapshot.invertedCastle) InvertedCastleTopPx else 0
     val sourceHeight = if (snapshot.invertedCastle) InvertedCastleHeightPx else NormalCastleHeightPx
     val sourceOrigin = snapshot.sourceMapOrigin()
-    val revealPath = Path()
+    val blueprintPath = Path()
+    val exploredPath = Path()
     val revealTileExtent = sotnRevealedMaskTileExtent(tileSize)
+    for ((tileX, tileY) in mapped.distinct()) {
+        val left = origin.x + (tileX - minTileX) * tileSize
+        val top = origin.y + (tileY - minTileY) * tileSize
+        val sourceX = tileX * SOURCE_TILE_STEP_PX - sourceOrigin.first
+        val sourceY = tileY * SOURCE_TILE_STEP_PX - sourceOrigin.second
+        if (sourceX in 0 until map.width && sourceY in 0 until sourceHeight) {
+            blueprintPath.addRect(
+                Rect(left, top, left + revealTileExtent, top + revealTileExtent)
+            )
+        } else {
+            drawRect(
+                RoomFallback.copy(alpha = BLUEPRINT_ALPHA),
+                topLeft = Offset(left, top),
+                size = Size(tileSize, tileSize),
+            )
+        }
+    }
     for ((tileX, tileY) in visited.distinct()) {
         val left = origin.x + (tileX - minTileX) * tileSize
         val top = origin.y + (tileY - minTileY) * tileSize
@@ -241,7 +341,7 @@ private fun DrawScope.drawDiscoveredCastleMap(
         if (sourceX in 0 until map.width && sourceY in 0 until sourceHeight) {
             // SotN reveals a 5x5-pixel patch for each room on its 4-pixel map grid.
             // Adjacent rooms share the fifth row/column, preserving the blueprint outline.
-            revealPath.addRect(
+            exploredPath.addRect(
                 Rect(left, top, left + revealTileExtent, top + revealTileExtent)
             )
         } else {
@@ -266,7 +366,21 @@ private fun DrawScope.drawDiscoveredCastleMap(
             .roundToInt(),
     )
     val sourceSize = IntSize(map.width, min(sourceHeight, map.height - sourceTop))
-    clipPath(revealPath) {
+    clipPath(blueprintPath) {
+        drawImage(
+            image = unexploredMap,
+            srcOffset = IntOffset(0, sourceTop),
+            srcSize = sourceSize,
+            dstOffset = destinationOffset,
+            dstSize = IntSize(
+                width = (sourceSize.width * sourceScale).roundToInt(),
+                height = (sourceSize.height * sourceScale).roundToInt(),
+            ),
+            alpha = BLUEPRINT_ALPHA,
+            filterQuality = FilterQuality.None,
+        )
+    }
+    clipPath(exploredPath) {
         drawImage(
             image = map,
             srcOffset = IntOffset(0, sourceTop),
@@ -337,10 +451,14 @@ private val CastleMapBackground = Color.Black
 private val RoomFallback = Color(0xFF5271F4)
 private val CurrentRoomMarker = Color(0xFFFFD45A)
 private val SourceBackgroundArgb = 0xFF546D8E.toInt()
+private val BlueprintRoomArgb = 0xFF5070F8.toInt()
+private val MapDoorArgb = 0xFFF80000.toInt()
+private val MapWarpArgb = 0xFFF88000.toInt()
 private const val SOURCE_TILE_STEP_PX = 4
 private const val REVEALED_TILE_SIZE_PX = 5
 private const val MAP_MARGIN_TILES = 2
 private const val MAX_LOCATION_MARKER_RADIUS = 18f
+private const val BLUEPRINT_ALPHA = 0.38f
 private const val NormalCastleHeightPx = 184
 // The normal-castle blueprint borders sit on the source image's four-pixel grid.
 // Keeping the origin on that same phase prevents partial-map clips from cutting
