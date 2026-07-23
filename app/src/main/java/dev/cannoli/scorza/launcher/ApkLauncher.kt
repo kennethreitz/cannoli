@@ -28,11 +28,16 @@ class ApkLauncher @Inject constructor(
         const val VIRTUAL_TV_SETTINGS_PACKAGE = "cannoli.virtual.tv_settings"
         private const val GAMEHUB_DETAIL_ACTIVITY =
             "com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity"
+        private const val STARBOARD_GAME_ACTIVITY =
+            "org.force9.starboard.ui.game.GameActivity"
     }
 
     fun launch(packageName: String): LaunchResult {
         GameHubTarget.decode(packageName)?.let { game ->
             return launchGameHub(game)
+        }
+        StarboardTarget.decode(packageName)?.let { game ->
+            return launchStarboard(game)
         }
         AndroidShortcutTarget.decode(packageName)?.let { shortcut ->
             return launchShortcut(shortcut)
@@ -74,6 +79,24 @@ class ApkLauncher @Inject constructor(
             "Failed to launch GameHub game",
             activityDisplayRouter.gameLaunchDisplayId(),
             logLabel = "gamehub",
+        )
+    }
+
+    private fun launchStarboard(target: StarboardTarget): LaunchResult {
+        if (!context.isPackageInstalled(target.packageName)) {
+            return LaunchResult.AppNotInstalled(target.packageName)
+        }
+        val intent = Intent().apply {
+            component = ComponentName(target.packageName, STARBOARD_GAME_ACTIVITY)
+            putExtra("zip_name", target.zipName)
+            putExtra("launcher", target.launcher)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch Starboard game",
+            activityDisplayRouter.gameLaunchDisplayId(),
+            logLabel = "starboard",
         )
     }
 

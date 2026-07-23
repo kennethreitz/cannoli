@@ -21,6 +21,8 @@ import dev.cannoli.scorza.launcher.AndroidShortcutTarget
 import dev.cannoli.scorza.launcher.GameHubTarget
 import dev.cannoli.scorza.launcher.InstalledCoreService
 import dev.cannoli.scorza.launcher.IntentAuditor
+import dev.cannoli.scorza.launcher.StarboardLibrary
+import dev.cannoli.scorza.launcher.StarboardTarget
 import dev.cannoli.scorza.launcher.isPackageInstalled
 import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.navigation.BrowsePurpose
@@ -54,6 +56,7 @@ class SettingsInputHandler @Inject constructor(
     private val intentAuditor: IntentAuditor,
     private val settingsViewModel: SettingsViewModel,
     private val launcherActions: LauncherActions,
+    private val starboardLibrary: StarboardLibrary,
     private val activityActions: ActivityActions,
     private val emulatorMappingBuilder: dev.cannoli.scorza.input.EmulatorMappingBuilder,
     @ApplicationContext private val context: Context,
@@ -345,7 +348,7 @@ class SettingsInputHandler @Inject constructor(
                 label to pkg
             }
             .distinctBy { it.second }
-        return (apps + getPinnedLauncherShortcuts() + getGameHubGames())
+        return (apps + getPinnedLauncherShortcuts() + getGameHubGames() + getStarboardGames())
             .distinctBy { it.second }
             .sortedBy { it.first.lowercase(java.util.Locale.ROOT) }
     }
@@ -356,6 +359,9 @@ class SettingsInputHandler @Inject constructor(
             target.title to target.encode()
         }
     }
+
+    private fun getStarboardGames(): List<Pair<String, String>> =
+        starboardLibrary.installedGames().map { target -> target.title to target.encode() }
 
     private fun getPinnedLauncherShortcuts(): List<Pair<String, String>> {
         val launcherApps = context.getSystemService(LauncherApps::class.java)
@@ -390,7 +396,7 @@ class SettingsInputHandler @Inject constructor(
             }
             selected.forEach { (name, pkg) ->
                 val appId = appsRepository.upsert(appType, name, pkg)
-                if (GameHubTarget.decode(pkg) != null) {
+                if (GameHubTarget.decode(pkg) != null || StarboardTarget.decode(pkg) != null) {
                     appsRepository.updateDisplayName(appId, name)
                 }
             }

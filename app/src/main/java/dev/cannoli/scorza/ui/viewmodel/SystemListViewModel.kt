@@ -11,6 +11,7 @@ import dev.cannoli.scorza.db.ScanScheduler
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.model.Platform
+import dev.cannoli.scorza.launcher.StarboardLibrary
 import dev.cannoli.scorza.scanner.RomDirectoryWatcher
 import dev.cannoli.scorza.settings.ContentMode
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +38,7 @@ class SystemListViewModel @Inject constructor(
     private val cannoliPaths: CannoliPathsProvider,
     private val romDirectoryWatcher: RomDirectoryWatcher,
     private val scanScheduler: ScanScheduler,
+    private val starboardLibrary: StarboardLibrary,
 ) {
     private val romDirectory: File get() = cannoliPaths.romDir
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -190,6 +192,7 @@ class SystemListViewModel @Inject constructor(
                 }
             }
 
+            starboardLibrary.syncInto(appsRepository)
             val toolCount = appsRepository.count(AppType.TOOL)
             val portCount = appsRepository.count(AppType.PORT)
 
