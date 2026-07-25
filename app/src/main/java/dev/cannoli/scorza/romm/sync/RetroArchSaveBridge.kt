@@ -8,6 +8,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.cannoli.scorza.config.CannoliPaths
 import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.launcher.LaunchState
 import dev.cannoli.scorza.settings.SettingsRepository
@@ -34,6 +36,8 @@ class RetroArchSaveBridge @Inject constructor(
     private val pathsProvider: CannoliPathsProvider,
     private val platformConfig: PlatformConfig,
     private val launchState: LaunchState,
+    private val roms: RomsRepository,
+    private val gameOverrides: GameOverrideStore,
 ) {
     private val paths get() = CannoliPaths(pathsProvider.root)
 
@@ -71,15 +75,15 @@ class RetroArchSaveBridge @Inject constructor(
         val romFile = File(pathsProvider.romDir, gameKey)
         if (!romFile.isFile) return false
         val tag = gameKey.substringBefore('/')
-        val override = platformConfig.getGameOverride(romFile.absolutePath)
-        if (override?.appPackage != null) return false
-        if (platformConfig.getSelectedStandaloneAppPackage(tag) != null) return false
-        val runner = override?.runner ?: platformConfig.getRunnerPreference(tag)
-        return when (EmulatorSource.fromRunnerLabel(runner)) {
+        val override = roms.romIdForRelativePath(gameKey)?.let { gameOverrides.get(it) }
+        val choice = override ?: platformConfig.getPlatformChoice(tag)
+        if (choice?.source == EmulatorSource.Standalone) return false
+        if (choice == null && platformConfig.getSelectedStandaloneAppPackage(tag) != null) return false
+        return when (choice?.source) {
             EmulatorSource.RetroArch -> true
             EmulatorSource.Internal, EmulatorSource.Standalone -> false
             null -> {
-                val core = override?.coreId ?: platformConfig.getCoreName(tag) ?: return false
+                val core = platformConfig.getCoreName(tag) ?: return false
                 !File(context.filesDir, "cores/${core}_android.so").isFile
             }
         }

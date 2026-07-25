@@ -158,6 +158,10 @@ sealed interface DialogState {
         val pendingConflicts: Int = 0,
         val syncErrors: Int = 0,
         val hasBackups: Boolean = false,
+        val citraAvailable: Boolean = false,
+        val citraLinked: Boolean = false,
+        val cemuAvailable: Boolean = false,
+        val cemuLinked: Boolean = false,
     ) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null, val fromQuickMenu: Boolean = false) : DialogState
     data class RommPlatformToggle(val items: List<RommPlatformToggleItem>, val selectedIndex: Int = 0) : DialogState
@@ -197,6 +201,7 @@ data class RommCollectionToggleItem(val group: dev.cannoli.scorza.romm.RommColle
 enum class ConflictChoice { KEEP_LOCAL, USE_SERVER, SKIP }
 data class ConflictRow(
     val gameKey: String,
+    val slot: String = dev.cannoli.scorza.romm.sync.DEFAULT_SLOT,
     val name: String,
     val choice: ConflictChoice = ConflictChoice.SKIP,
     val localMillis: Long? = null,

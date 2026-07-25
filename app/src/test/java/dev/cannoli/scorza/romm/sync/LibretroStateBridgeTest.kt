@@ -1,7 +1,12 @@
 package dev.cannoli.scorza.romm.sync
 
 import androidx.test.core.app.ApplicationProvider
+import dev.cannoli.scorza.config.EmulatorChoice
+import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
+import io.mockk.mockk
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.launcher.LaunchState
 import dev.cannoli.scorza.settings.SettingsRepository
@@ -38,7 +43,11 @@ class LibretroStateBridgeTest {
         settings.sdCardRoot = sd.absolutePath
         val paths = CannoliPathsProvider(settings)
         platformConfig = PlatformConfig(sd, context.assets)
-        bridge = LibretroStateBridge(paths, platformConfig, LaunchState())
+        bridge = LibretroStateBridge(
+            paths, platformConfig, LaunchState(),
+            roms = mockk<RomsRepository>(relaxed = true),
+            gameOverrides = mockk<GameOverrideStore>(relaxed = true),
+        )
         File(paths.romDir, gameKey).apply {
             parentFile?.mkdirs()
             writeBytes(byteArrayOf(1))
@@ -128,7 +137,7 @@ class LibretroStateBridgeTest {
         val downloaded = tmp.newFile("old-core.zip")
         archive.copyTo(downloaded, overwrite = true)
 
-        platformConfig.setCoreMapping("SNES", "bsnes_libretro", "RetroArch")
+        platformConfig.setPlatformChoice("SNES", EmulatorChoice(EmulatorSource.RetroArch, "bsnes_libretro"))
 
         assertNotEquals(oldSlot, bridge.slot(gameKey))
         val error = runCatching {

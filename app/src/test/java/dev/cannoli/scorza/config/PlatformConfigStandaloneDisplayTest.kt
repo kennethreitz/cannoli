@@ -33,7 +33,7 @@ class PlatformConfigStandaloneDisplayTest {
 
     @Test fun `RomM identity follows selected Citra MMJ app instead of bundled core`() {
         val pc = config()
-        pc.setAppMapping("3DS", "org.citra.emu")
+        pc.setPlatformChoice("3DS", EmulatorChoice(EmulatorSource.Standalone, appPackage = "org.citra.emu"))
         val rom = Rom(0, java.io.File("/tmp/game.3ds"), "3DS", "Game")
 
         assertEquals("Citra MMJ", RomKeys.coreDisplayNameFor(rom, pc))

@@ -153,7 +153,29 @@ object RommModule {
         statusHolder: SaveSyncStatusHolder,
         matcher: dev.cannoli.scorza.romm.sync.RommCacheMatcher,
         roms: dev.cannoli.scorza.db.RomsRepository,
-    ): SaveSyncService = SaveSyncService(client, connStore, settings, registrar, store, resolver, links, paths, backupManager, history, pendingConflicts, promotions, statusHolder, matcher, roms)
+        standalone: dev.cannoli.scorza.romm.sync.StandaloneSaveBridge,
+        libretroStates: dev.cannoli.scorza.romm.sync.LibretroStateBridge,
+        retroArch: dev.cannoli.scorza.romm.sync.RetroArchSaveBridge,
+    ): SaveSyncService = SaveSyncService(
+        client,
+        connStore,
+        settings,
+        registrar,
+        store,
+        resolver,
+        links,
+        paths,
+        backupManager,
+        history,
+        pendingConflicts,
+        promotions,
+        statusHolder,
+        matcher,
+        roms,
+        standalone,
+        libretroStates,
+        retroArch,
+    )
 
     @Provides @Singleton
     fun provideRommCacheMatcher(

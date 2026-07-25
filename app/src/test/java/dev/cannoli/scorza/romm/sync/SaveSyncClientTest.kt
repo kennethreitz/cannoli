@@ -81,4 +81,31 @@ class SaveSyncClientTest {
         assertTrue(req.path!!.startsWith("/api/saves/100/content?"))
         assertTrue(req.path!!.contains("optimistic=false"))
     }
+
+    @Test fun states_use_native_state_endpoints() {
+        server.enqueue(
+            MockResponse().setBody(
+                """[{"id":7,"rom_id":42,"file_name":"Mario.statebundle","file_size_bytes":12,"updated_at":"2026-07-25T12:00:00Z"}]""",
+            ),
+        )
+        assertEquals(7, client.getStates(42).single().id)
+        assertEquals("/api/states?rom_id=42", server.takeRequest().path)
+
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":8,"rom_id":42,"file_name":"Mario.statebundle","file_size_bytes":12,"updated_at":"2026-07-25T12:01:00Z"}""",
+            ),
+        )
+        val state = tmp.newFile("Mario.statebundle").apply { writeText("STATE-BUNDLE") }
+        assertEquals(8, client.uploadState(42, "Snes9x", state).id)
+        val upload = server.takeRequest()
+        assertTrue(upload.path!!.startsWith("/api/states?"))
+        assertTrue(upload.body.readUtf8().contains("name=\"stateFile\""))
+
+        server.enqueue(MockResponse().setBody("STATE-BUNDLE"))
+        val downloaded = tmp.newFile("state-download.bin")
+        client.downloadStateContent(8, downloaded)
+        assertEquals("STATE-BUNDLE", downloaded.readText())
+        assertEquals("/api/states/8/content", server.takeRequest().path)
+    }
 }

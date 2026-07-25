@@ -1,7 +1,12 @@
 package dev.cannoli.scorza.romm.sync
 
 import androidx.test.core.app.ApplicationProvider
+import dev.cannoli.scorza.config.EmulatorChoice
+import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
+import io.mockk.mockk
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.launcher.LaunchState
 import dev.cannoli.scorza.settings.SettingsRepository
@@ -38,13 +43,17 @@ class RetroArchSaveBridgeTest {
         }
         val paths = CannoliPathsProvider(settings)
         val config = PlatformConfig(sd, context.assets).apply {
-            setCoreMapping("GBA", "mgba_libretro", "RetroArch")
+            setPlatformChoice("GBA", EmulatorChoice(EmulatorSource.RetroArch, "mgba_libretro"))
         }
         File(paths.romDir, gameKey).apply {
             parentFile?.mkdirs()
             writeText("ROM")
         }
-        bridge = RetroArchSaveBridge(context, settings, paths, config, LaunchState()).apply {
+        bridge = RetroArchSaveBridge(
+            context, settings, paths, config, LaunchState(),
+            roms = mockk<RomsRepository>(relaxed = true),
+            gameOverrides = mockk<GameOverrideStore>(relaxed = true),
+        ).apply {
             externalRootOverride = external
             storageAccessOverride = true
             installedOverride = true

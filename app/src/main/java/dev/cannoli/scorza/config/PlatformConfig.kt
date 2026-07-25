@@ -367,10 +367,11 @@ class PlatformConfig(
         userChoices[tag]?.takeIf { it.source == EmulatorSource.Standalone }?.appPackage
 
     fun getSelectedStandaloneAppPackage(tag: String): String? {
-        userApps[tag]?.let { return it }
-        if (userRunners[tag] == "Standalone" || userRunners[tag] == "App") {
-            return getAppPackage(tag)
+        userChoices[tag]?.let { choice ->
+            return if (choice.source == EmulatorSource.Standalone) choice.appPackage else null
         }
+        // No stored choice: a platform that has only a standalone app (no core) still
+        // identifies as that app. A platform with a core does not.
         return getAppPackage(tag).takeIf { getCoreName(tag).isNullOrBlank() }
     }
 

@@ -1,7 +1,11 @@
 package dev.cannoli.scorza.romm.sync
 
 import dev.cannoli.scorza.config.CannoliPaths
+import dev.cannoli.scorza.config.EmulatorChoice
+import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.launcher.LaunchState
 import dev.cannoli.scorza.model.Rom
@@ -21,6 +25,8 @@ class LibretroStateBridge @Inject constructor(
     private val pathsProvider: CannoliPathsProvider,
     private val platformConfig: PlatformConfig,
     private val launchState: LaunchState,
+    private val roms: RomsRepository,
+    private val gameOverrides: GameOverrideStore,
 ) {
     private val paths get() = CannoliPaths(pathsProvider.root)
 
@@ -146,14 +152,20 @@ class LibretroStateBridge @Inject constructor(
             ?.forEach { it.delete() }
     }
 
+    private fun choiceFor(gameKey: String): EmulatorChoice? {
+        val tag = gameKey.substringBefore('/')
+        val override = roms.romIdForRelativePath(gameKey)?.let { gameOverrides.get(it) }
+        return override ?: platformConfig.getPlatformChoice(tag)
+    }
+
     private fun coreIdentity(gameKey: String): String? {
         val romFile = File(pathsProvider.romDir, gameKey)
         if (!romFile.isFile) return null
         val tag = gameKey.substringBefore('/')
-        val override = platformConfig.getGameOverride(romFile.absolutePath)
-        if (override?.appPackage != null) return null
-        if (platformConfig.getSelectedStandaloneAppPackage(tag) != null) return null
-        return override?.coreId?.takeIf { it.isNotBlank() }
+        val choice = choiceFor(gameKey)
+        if (choice?.source == EmulatorSource.Standalone) return null
+        if (choice == null && platformConfig.getSelectedStandaloneAppPackage(tag) != null) return null
+        return choice?.coreId?.takeIf { it.isNotBlank() }
             ?: platformConfig.getCoreName(tag)?.takeIf { it.isNotBlank() }
     }
 
