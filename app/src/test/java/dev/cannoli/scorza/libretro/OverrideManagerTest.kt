@@ -48,6 +48,7 @@ class OverrideManagerTest {
         assertEquals(ScreenEffect.NONE, s.screenEffect)
         assertEquals(Sharpness.SHARP, s.sharpness)
         assertEquals(4, s.maxFfSpeed)
+        assertEquals(4, s.maxRewindSpeed)
         assertEquals("", s.shaderPreset)
         assertTrue(s.coreOptions.isEmpty())
         assertTrue(s.shaderParams.isEmpty())
@@ -62,6 +63,7 @@ class OverrideManagerTest {
             scaling=FULLSCREEN
             sharpness=SOFT
             max_ff_speed=8
+            max_rewind_speed=6
             crt_curvature=2.0
             shader_preset=foo.glslp
             """
@@ -70,6 +72,7 @@ class OverrideManagerTest {
         assertEquals(ScalingMode.FULLSCREEN, s.scalingMode)
         assertEquals(Sharpness.SOFT, s.sharpness)
         assertEquals(8, s.maxFfSpeed)
+        assertEquals(6, s.maxRewindSpeed)
         assertEquals(2f, s.crtCurvature, 0f)
         assertEquals("foo.glslp", s.shaderPreset)
     }
@@ -211,6 +214,7 @@ class OverrideManagerTest {
         assertEquals("INTEGER", parsed.get("frontend", "scaling"))
         assertEquals("SHADER", parsed.get("frontend", "effect"))
         assertEquals("crt-cannoli.glslp", parsed.get("frontend", "shader_preset"))
+        assertEquals("4", parsed.get("frontend", "max_rewind_speed"))
         assertEquals("Hardware", parsed.get("options", "swanstation_GPU_Renderer"))
         assertEquals("0.7", parsed.get("shader_params", "strength"))
     }

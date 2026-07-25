@@ -6,6 +6,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <deque>
 #include <mutex>
 #include <android/log.h>
 #include <zlib.h>
@@ -64,6 +65,17 @@ static unsigned g_frame_width = 0;
 static unsigned g_frame_height = 0;
 static size_t g_frame_pitch = 0;
 static bool g_frame_ready = false;
+
+// In-memory rewind history. This is deliberately kept on the native side so
+// capturing a state each rendered frame does not create large, short-lived
+// Kotlin ByteArrays or touch the filesystem.
+static std::deque<std::vector<uint8_t>> g_rewind_states;
+static size_t g_rewind_bytes = 0;
+
+static void clear_rewind_history() {
+    g_rewind_states.clear();
+    g_rewind_bytes = 0;
+}
 
 static JavaVM *g_jvm = nullptr;
 
@@ -678,6 +690,7 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeAudioGetDiagnostics(JNIEnv
 
 JNIEXPORT jintArray JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeLoadGame(JNIEnv *env, jobject, jstring romPath) {
+    clear_rewind_history();
     const char *path = env->GetStringUTFChars(romPath, nullptr);
 
     struct retro_system_info sys_info = {0};
@@ -867,6 +880,56 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeSaveState(JNIEnv *env, job
     fclose(f);
     free(buf);
     return JNI_TRUE;
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCaptureRewindState(
+        JNIEnv *, jobject, jint maxBytes) {
+    size_t size = core.serialize_size();
+    if (size == 0 || maxBytes <= 0 || size > (size_t)maxBytes) return -1;
+
+    std::vector<uint8_t> state(size);
+    if (!core.serialize(state.data(), size)) return 0;
+
+    while (!g_rewind_states.empty() &&
+           g_rewind_bytes + size > (size_t)maxBytes) {
+        g_rewind_bytes -= g_rewind_states.front().size();
+        g_rewind_states.pop_front();
+    }
+
+    g_rewind_bytes += size;
+    g_rewind_states.push_back(std::move(state));
+    return 1;
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeRewind(
+        JNIEnv *, jobject, jint steps) {
+    if (steps <= 0 || g_rewind_states.empty()) return 0;
+
+    std::vector<uint8_t> target;
+    jint restoredSteps = 0;
+    while (restoredSteps < steps && !g_rewind_states.empty()) {
+        target = std::move(g_rewind_states.back());
+        g_rewind_bytes -= target.size();
+        g_rewind_states.pop_back();
+        restoredSteps++;
+    }
+
+    if (target.empty() || !core.unserialize(target.data(), target.size())) return -1;
+    return restoredSteps;
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeGetRewindStateCount(
+        JNIEnv *, jobject) {
+    return (jint)g_rewind_states.size();
+}
+
+JNIEXPORT void JNICALL
+Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeClearRewindHistory(
+        JNIEnv *, jobject) {
+    clear_rewind_history();
 }
 
 static void *rzip_decompress(const void *src, size_t src_size, size_t *out_size) {
@@ -1094,11 +1157,13 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCheatMemorySize(JNIEnv *, 
 
 JNIEXPORT void JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeUnloadGame(JNIEnv *, jobject) {
+    clear_rewind_history();
     core.unload_game();
 }
 
 JNIEXPORT void JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeDeinit(JNIEnv *env, jobject) {
+    clear_rewind_history();
     core.deinit();
     if (core.handle) {
         dlclose(core.handle);

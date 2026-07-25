@@ -61,6 +61,10 @@ class LauncherIgmSettingsProvider(
                 }
             }
             add(GenericIgmSettingsItem.Choice("advanced.ffSpeed", strings.maxFfSpeed, "${host.maxFfSpeed}x"))
+            if (host.experimentalFeatures) {
+                add(GenericIgmSettingsItem.Choice(
+                    "advanced.rewindSpeed", strings.maxRewindSpeed, "${host.maxRewindSpeed}x"))
+            }
             add(GenericIgmSettingsItem.Choice(
                 "advanced.showFps", strings.showFps, if (host.showFpsBaseline) strings.on else strings.off))
             add(GenericIgmSettingsItem.Choice(
@@ -123,6 +127,7 @@ class LauncherIgmSettingsProvider(
             "video.shader" -> host.cycleShader(direction)
             "video.overlay" -> host.cycleOverlay(direction)
             "advanced.ffSpeed" -> host.cycleFfSpeed(direction)
+            "advanced.rewindSpeed" -> host.cycleRewindSpeed(direction)
             "advanced.showFps" -> host.toggleShowFps()
             "advanced.debugHud" -> host.toggleDebugHud()
             "input.leftStick" -> host.toggleLeftStickAsDpad()

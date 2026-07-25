@@ -475,7 +475,7 @@ class InputRouter @Inject constructor(
         },
         onNorth = {
             if (!listening) {
-                ShortcutAction.entries.getOrNull(selectedIndex)?.let { action ->
+                actions.getOrNull(selectedIndex)?.let { action ->
                     nav.replaceTop(copy(shortcuts = shortcuts + (action to emptySet())))
                 }
             }

@@ -5,6 +5,7 @@ import dev.cannoli.scorza.libretro.LibretroRunner
 interface LauncherSettingsHost {
     val hasShaderParams: Boolean
     val maxFfSpeed: Int
+    val maxRewindSpeed: Int
     val showFpsBaseline: Boolean
     val debugHud: Boolean
     val leftStickAsDpad: Boolean
@@ -26,6 +27,7 @@ interface LauncherSettingsHost {
     fun cycleShader(direction: Int)
     fun cycleOverlay(direction: Int)
     fun cycleFfSpeed(direction: Int)
+    fun cycleRewindSpeed(direction: Int)
     fun toggleShowFps()
     fun toggleDebugHud()
     fun toggleLeftStickAsDpad()

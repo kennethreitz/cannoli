@@ -72,6 +72,7 @@
     <string name="shortcut_action_cycle_shader">Cycle Shader</string>
     <string name="shortcut_action_toggle_ff">Toggle Fast Forward</string>
     <string name="shortcut_action_hold_ff">Hold Fast Forward</string>
+    <string name="shortcut_action_hold_rewind">Hold Rewind</string>
     <string name="shortcut_action_open_guide">Open Guide</string>
     <string name="shortcut_action_open_menu">Open In-Game Menu</string>
     <string name="shortcut_action_toggle_show_fps">Toggle FPS Display</string>
@@ -637,6 +638,8 @@
     <!-- OSD toast. %1$s = save slot name. -->
     <string name="osd_state_deleted">Deleted %1$s</string>
     <string name="osd_reset">Reset</string>
+    <string name="osd_rewind_empty">Rewind buffer is empty</string>
+    <string name="osd_rewind_unsupported">Rewind is not supported by this core</string>
     <!-- OSD toast. %1$s = scaling mode name. -->
     <string name="osd_scaling">Scaling: %1$s</string>
     <!-- OSD toast. %1$s = shader preset name. -->

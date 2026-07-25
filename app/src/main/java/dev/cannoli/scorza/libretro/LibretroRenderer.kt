@@ -26,11 +26,17 @@ enum class Sharpness { SHARP, SOFT }
 enum class ScreenEffect { NONE, SHADER }
 
 private const val FPS_EMA_ALPHA = 0.05
+private const val REWIND_BUFFER_BYTES = 64 * 1024 * 1024
 
 class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Renderer {
 
     @Volatile var paused = false
     @Volatile var fastForwardFrames = 0
+    @Volatile var rewindEnabled = false
+    @Volatile var rewinding = false
+    @Volatile var rewindFrames = 4
+    @Volatile var rewindHistoryAvailable = false; private set
+    @Volatile var rewindSupported = true; private set
     @Volatile var coreTargetFps = 60.0
     @Volatile var lockedToVsync = false
     @Volatile var scalingMode = ScalingMode.CORE_REPORTED
@@ -53,6 +59,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     @Volatile private var shaderDirty = false
     @Volatile private var overlayDirty = false
     @Volatile private var pipelineDirty = false
+    @Volatile private var rewindClearRequested = false
     private var pipeline: ShaderPipeline? = null
     private var pipelineWarmedUp = false
     private var overlayTextureId = 0
@@ -84,6 +91,12 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
 
     fun clearShaderParamOverrides() {
         shaderParamOverrides.clear()
+    }
+
+    fun clearRewindHistory() {
+        rewindClearRequested = true
+        rewindHistoryAvailable = false
+        rewindSupported = true
     }
 
     @Volatile var onFrameRendered: (() -> Unit)? = null
@@ -201,25 +214,44 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
             loggedFirstFrame = true
             logger?.invoke("GL first frame: surface=${surfaceWidth}x${surfaceHeight}")
         }
+        if (rewindClearRequested) {
+            rewindClearRequested = false
+            runner.clearRewindHistory()
+        }
         if (!paused) {
             val now = System.nanoTime()
             val delta = if (lastDrawNanos == 0L) 0L else now - lastDrawNanos
             lastDrawNanos = now
 
-            val extra = fastForwardFrames
-            if (extra > 0) {
-                runEmulatedFrame()
-                repeat(extra - 1) { runEmulatedFrame() }
-            } else if (lockedToVsync) {
-                val frameDurationNs = (1_000_000_000.0 / coreTargetFps).toLong()
-                if (lockedPacer.shouldRunFrame(delta, frameDurationNs)) runEmulatedFrame()
-            } else {
-                val frameDurationNs = (1_000_000_000.0 / coreTargetFps).toLong()
-                frameAccumulatorNs += delta
-                if (frameAccumulatorNs > frameDurationNs * 2) frameAccumulatorNs = frameDurationNs * 2
-                while (frameAccumulatorNs >= frameDurationNs) {
+            if (rewindEnabled && rewinding) {
+                val result = runner.rewind(rewindFrames.coerceAtLeast(1))
+                rewindHistoryAvailable = runner.getRewindStateCount() > 0
+                if (result > 0) {
+                    // Unserializing restores core state but does not invoke the video
+                    // callback, so run one muted frame to display the restored moment.
                     runEmulatedFrame()
-                    frameAccumulatorNs -= frameDurationNs
+                } else if (result < 0) {
+                    rewindSupported = false
+                    runner.clearRewindHistory()
+                    rewindHistoryAvailable = false
+                }
+            } else {
+                val extra = fastForwardFrames
+                if (extra > 0) {
+                    captureRewindState()
+                    runEmulatedFrame()
+                    repeat(extra - 1) { runEmulatedFrame() }
+                } else if (lockedToVsync) {
+                    val frameDurationNs = (1_000_000_000.0 / coreTargetFps).toLong()
+                    if (lockedPacer.shouldRunFrame(delta, frameDurationNs)) runForwardFrame()
+                } else {
+                    val frameDurationNs = (1_000_000_000.0 / coreTargetFps).toLong()
+                    frameAccumulatorNs += delta
+                    if (frameAccumulatorNs > frameDurationNs * 2) frameAccumulatorNs = frameDurationNs * 2
+                    while (frameAccumulatorNs >= frameDurationNs) {
+                        runForwardFrame()
+                        frameAccumulatorNs -= frameDurationNs
+                    }
                 }
             }
         }
@@ -381,6 +413,23 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     private fun runEmulatedFrame() {
         runner.run()
         fpsMeter.tick(System.nanoTime())
+    }
+
+    private fun runForwardFrame() {
+        captureRewindState()
+        runEmulatedFrame()
+    }
+
+    private fun captureRewindState() {
+        if (!rewindEnabled || !rewindSupported) return
+        when (runner.captureRewindState(REWIND_BUFFER_BYTES)) {
+            1 -> rewindHistoryAvailable = true
+            -1 -> {
+                rewindSupported = false
+                rewindHistoryAvailable = false
+                logger?.invoke("rewind unavailable: core state is unsupported or larger than buffer")
+            }
+        }
     }
 
     private fun drawSimple(w: Int, h: Int, vpX: Int, vpY: Int, vpW: Int, vpH: Int) {

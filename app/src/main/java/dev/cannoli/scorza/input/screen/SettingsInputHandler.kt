@@ -147,7 +147,10 @@ class SettingsInputHandler @Inject constructor(
             "logging" -> nav.push(LauncherScreen.LoggingSettings())
             "audit_emulator_intents" -> runIntentAudit()
             "icon_gallery" -> nav.push(LauncherScreen.IconGallery())
-            "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(shortcuts = globalOverrides.readShortcuts()))
+            "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(
+                shortcuts = globalOverrides.readShortcuts(),
+                experimentalFeatures = settings.experimentalFeatures,
+            ))
             "input_tester" -> {
                 inputTesterController.enter()
                 nav.push(LauncherScreen.InputTester)

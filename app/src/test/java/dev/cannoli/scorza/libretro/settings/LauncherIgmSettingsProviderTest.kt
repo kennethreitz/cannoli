@@ -3,6 +3,7 @@ package dev.cannoli.scorza.libretro.settings
 import dev.cannoli.igm.GenericIgmSettingsItem
 import dev.cannoli.igm.IgmSettingsExit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -144,6 +145,21 @@ class LauncherIgmSettingsProviderTest {
     }
 
     @Test
+    fun `advanced shows rewind speed beside ff only for experimental features`() {
+        val normal = provider().first.screen(listOf("advanced")).items.map { it.label }
+        assertFalse(normal.contains("Max Rewind Speed"))
+
+        val host = FakeLauncherSettingsHost().apply {
+            experimentalFeatures = true
+            maxRewindSpeed = 6
+        }
+        val row = provider(host).first.screen(listOf("advanced")).items
+            .filterIsInstance<GenericIgmSettingsItem.Choice>()
+            .first { it.label == "Max Rewind Speed" }
+        assertEquals("6x", row.value)
+    }
+
+    @Test
     fun `input hides dpad mode unless experimental features are on`() {
         val (p, _) = provider()
         assertEquals(
@@ -179,13 +195,14 @@ class LauncherIgmSettingsProviderTest {
     fun `cycling advanced and input rows delegates to the host`() {
         val (p, host) = provider()
         p.cycle("advanced.ffSpeed", 1)
+        p.cycle("advanced.rewindSpeed", -1)
         p.cycle("advanced.showFps", 1)
         p.cycle("advanced.debugHud", -1)
         p.cycle("advanced.controller.2", 1)
         p.cycle("input.leftStick", 1)
         p.cycle("input.dpadMode", -1)
         assertEquals(
-            listOf("ff:1", "showFps", "debugHud", "port2:1", "leftStick", "dpadMode"),
+            listOf("ff:1", "rewind:-1", "showFps", "debugHud", "port2:1", "leftStick", "dpadMode"),
             host.calls,
         )
     }
