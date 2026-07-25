@@ -5,6 +5,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class SaveHasherTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -36,5 +38,28 @@ class SaveHasherTest {
         val b = file("b.mcr", "two".toByteArray())
         // Insertion order b,a must not change the result; RomM sorts namelist().
         assertEquals("c065716f579488420c1c940ccafabbb3", SaveHasher.hashBundle(mapOf("b.mcr" to b, "a.mcr" to a)))
+    }
+
+    @Test fun hashZipBundle_matches_romm_zip_content_hash() {
+        val archive = File(tmp.root, "save.zip")
+        ZipOutputStream(archive.outputStream()).use { zip ->
+            listOf(
+                "save/Settings" to "settings",
+                "cannoli-standalone-save.txt" to "manifest",
+                "save/SaveSlot0" to "slot",
+            ).forEach { (name, contents) ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(contents.toByteArray())
+                zip.closeEntry()
+            }
+        }
+        val expected = SaveHasher.hashBundle(
+            mapOf(
+                "save/Settings" to file("settings", "settings".toByteArray()),
+                "cannoli-standalone-save.txt" to file("manifest", "manifest".toByteArray()),
+                "save/SaveSlot0" to file("slot", "slot".toByteArray()),
+            ),
+        )
+        assertEquals(expected, SaveHasher.hashZipBundle(archive))
     }
 }

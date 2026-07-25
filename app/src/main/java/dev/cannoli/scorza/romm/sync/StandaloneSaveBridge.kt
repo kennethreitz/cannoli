@@ -51,7 +51,7 @@ class StandaloneSaveBridge @Inject constructor(
     }
 
     fun isLinked(kind: StandaloneSaveKind): Boolean =
-        treeUri(kind) != null
+        directFileRoot(kind) != null || treeUri(kind) != null
 
     fun accessIntent(kind: StandaloneSaveKind): Intent {
         val initialUri = kind.initialDocumentId?.let {
@@ -97,6 +97,9 @@ class StandaloneSaveBridge @Inject constructor(
         gameKey: String,
         base: String,
     ): StandaloneMirrorResult {
+        directFileRoot(kind)?.let { fileRoot ->
+            return refreshFileMirror(kind, gameKey, base, fileRoot)
+        }
         val tree = treeUri(kind)
             ?: return StandaloneMirrorResult.Unavailable("${kind.emulatorName} save folder is not connected")
         val rom = File(romDir, gameKey)
@@ -144,6 +147,10 @@ class StandaloneSaveBridge @Inject constructor(
         gameKey: String,
         archive: File,
     ) {
+        directFileRoot(kind)?.let { fileRoot ->
+            applyFileMirror(kind, gameKey, archive, fileRoot)
+            return
+        }
         val tree = treeUri(kind)
             ?: throw IllegalStateException("${kind.emulatorName} save folder is not connected")
         val titleId = StandaloneTitleIdParser.titleId(kind, File(romDir, gameKey))
@@ -167,6 +174,75 @@ class StandaloneSaveBridge @Inject constructor(
 
     fun archiveMode(kind: StandaloneSaveKind?): LocalSaveMode =
         if (kind != null) LocalSaveMode.STANDALONE_ARCHIVE else LocalSaveMode.NORMAL
+
+    private fun directFileRoot(kind: StandaloneSaveKind): File? {
+        if (kind != StandaloneSaveKind.VITA3K) return null
+        val root = File(VITA3K_PUBLIC_ROOT)
+        val savedata = File(root, VITA3K_SAVEDATA_PATH)
+        return root.takeIf {
+            it.isDirectory &&
+                savedata.isDirectory &&
+                savedata.canRead() &&
+                savedata.canWrite()
+        }
+    }
+
+    private fun refreshFileMirror(
+        kind: StandaloneSaveKind,
+        gameKey: String,
+        base: String,
+        fileRoot: File,
+    ): StandaloneMirrorResult {
+        val rom = File(romDir, gameKey)
+        val titleId = StandaloneTitleIdParser.titleId(kind, rom)
+            ?: return StandaloneMirrorResult.Unavailable("could not read title ID from ${rom.name}")
+        return try {
+            val saveRoot = File(fileRoot, "$VITA3K_SAVEDATA_PATH/${titleId.uppercase()}")
+            val files = saveRoot.walkTopDown().filter { it.isFile }.toList()
+            if (files.isEmpty()) {
+                dev.cannoli.scorza.util.RommLog.write(
+                    "standalone ${kind.emulatorName} save missing [$base]: title=$titleId root=${fileRoot.path}",
+                )
+                standaloneArchive(kind.platformTag, base).delete()
+                StandaloneMirrorResult.Missing
+            } else {
+                val archive = standaloneArchive(kind.platformTag, base)
+                val archiveDir = requireNotNull(archive.parentFile).apply { mkdirs() }
+                val temp = File.createTempFile("standalone-save", ".zip", archiveDir)
+                try {
+                    writeFileArchive(kind, titleId, saveRoot, files, temp)
+                    if (!archive.isFile || SaveHasher.hashFile(archive) != SaveHasher.hashFile(temp)) {
+                        replaceFile(temp, archive)
+                        val newest = files.maxOfOrNull(File::lastModified) ?: 0L
+                        archive.setLastModified(if (newest > 0L) newest else System.currentTimeMillis())
+                    }
+                } finally {
+                    temp.delete()
+                }
+                StandaloneMirrorResult.Ready(archive)
+            }
+        } catch (t: Throwable) {
+            StandaloneMirrorResult.Unavailable(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    private fun applyFileMirror(
+        kind: StandaloneSaveKind,
+        gameKey: String,
+        archive: File,
+        fileRoot: File,
+    ) {
+        val titleId = StandaloneTitleIdParser.titleId(kind, File(romDir, gameKey))
+            ?: throw IllegalStateException("could not read title ID from ${File(gameKey).name}")
+        val stage = createStageDirectory()
+        try {
+            extractAndValidate(archive, stage, kind, titleId)
+            val saveRoot = File(fileRoot, "$VITA3K_SAVEDATA_PATH/${titleId.uppercase()}")
+            reconcileFileTree(saveRoot, stage)
+        } finally {
+            stage.deleteRecursively()
+        }
+    }
 
     private fun treeUri(kind: StandaloneSaveKind): Uri? =
         treePreferences.getString(treePreferenceKey(kind), null)
@@ -288,6 +364,26 @@ class StandaloneSaveBridge @Inject constructor(
         }
     }
 
+    private fun writeFileArchive(
+        kind: StandaloneSaveKind,
+        titleId: String,
+        saveRoot: File,
+        files: List<File>,
+        destination: File,
+    ) {
+        ZipOutputStream(destination.outputStream().buffered()).use { zip ->
+            zip.putNextEntry(stableEntry(MANIFEST_NAME))
+            zip.write(manifest(kind, titleId).toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+            for (file in files.sortedBy { it.relativeTo(saveRoot).invariantSeparatorsPath }) {
+                val relative = file.relativeTo(saveRoot).invariantSeparatorsPath
+                zip.putNextEntry(stableEntry("save/$relative"))
+                file.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+    }
+
     private fun extractAndValidate(
         archive: File,
         stage: File,
@@ -391,6 +487,40 @@ class StandaloneSaveBridge @Inject constructor(
         stale.sortedByDescending { it.relativePath.length }.forEach { docs.delete(it.node) }
     }
 
+    private fun reconcileFileTree(saveRoot: File, stage: File) {
+        check(saveRoot.mkdirs() || saveRoot.isDirectory) {
+            "cannot create Vita3K save directory"
+        }
+        val canonicalRoot = saveRoot.canonicalFile
+        val incoming = stage.walkTopDown()
+            .filter { it.isFile }
+            .associateBy { it.relativeTo(stage).invariantSeparatorsPath }
+
+        for ((relative, source) in incoming.toSortedMap()) {
+            val target = File(canonicalRoot, relative).canonicalFile
+            check(target.path.startsWith(canonicalRoot.path + File.separator)) {
+                "unsafe Vita3K save path"
+            }
+            target.parentFile?.mkdirs()
+            val temp = File.createTempFile(".cannoli-save-", ".tmp", target.parentFile)
+            try {
+                source.copyTo(temp, overwrite = true)
+                replaceFile(temp, target)
+            } finally {
+                temp.delete()
+            }
+        }
+
+        // Publish all incoming bytes before removing files no longer present in the server copy.
+        saveRoot.walkTopDown()
+            .filter { it.isFile && it.relativeTo(saveRoot).invariantSeparatorsPath !in incoming }
+            .toList()
+            .forEach { check(it.delete()) { "cannot remove stale Vita3K save file ${it.name}" } }
+        saveRoot.walkBottomUp()
+            .filter { it.isDirectory && it != saveRoot && it.list()?.isEmpty() == true }
+            .forEach(File::delete)
+    }
+
     private fun manifest(kind: StandaloneSaveKind, titleId: String): String =
         "format=$ARCHIVE_FORMAT\nemulator=${kind.name}\ntitle_id=${titleId.uppercase()}\n"
 
@@ -420,6 +550,8 @@ class StandaloneSaveBridge @Inject constructor(
         const val ARCHIVE_FORMAT = 1
         const val MAX_ARCHIVE_ENTRIES = 100_000
         const val MAX_ARCHIVE_BYTES = 1024L * 1024L * 1024L
+        const val VITA3K_PUBLIC_ROOT = "/storage/emulated/0/Vita3K/vita"
+        const val VITA3K_SAVEDATA_PATH = "ux0/user/00/savedata"
     }
 }
 

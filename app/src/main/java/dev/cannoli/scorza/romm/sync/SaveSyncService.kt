@@ -73,9 +73,19 @@ class SaveSyncService(
         if (!syncEnabled()) return null
         if (!RommCapabilities.isSupported(connStore.serverVersion)) return null
         if (registrar.deviceId().isNullOrEmpty()) return null
-        links.rommIdForPath(gameKey)?.let { return it }
         val tag = gameKey.substringBefore('/')
         val fileName = java.io.File(gameKey).name
+        if (tag.equals(StandaloneSaveKind.VITA3K.platformTag, ignoreCase = true)) {
+            val launcher = File(pathsProvider.romDir, gameKey)
+            if (!launcher.extension.equals("psvita", ignoreCase = true)) return null
+        }
+        links.rommIdForPath(gameKey)?.let { return it }
+        if (tag.equals(StandaloneSaveKind.VITA3K.platformTag, ignoreCase = true)) {
+            val launcher = File(pathsProvider.romDir, gameKey)
+            StandaloneTitleIdParser.vita3kTitleId(launcher)?.let { titleId ->
+                matcher.rommIdForTitleId(tag, titleId)?.let { return it }
+            }
+        }
         return matcher.rommIdFor(tag, fileName)
     }
 
@@ -992,9 +1002,15 @@ class SaveSyncService(
     private fun verifyDownloaded(tmp: File, expectedHash: String?) {
         if (tmp.length() == 0L) throw IllegalStateException("empty download")
         if (expectedHash != null && expectedHash.length == 32) {
-            val actual = SaveHasher.hashFile(tmp)
-            if (!actual.equals(expectedHash, ignoreCase = true)) {
-                throw IllegalStateException("hash mismatch (expected $expectedHash, got $actual)")
+            val rawHash = SaveHasher.hashFile(tmp)
+            if (!rawHash.equals(expectedHash, ignoreCase = true)) {
+                val bundleHash = SaveHasher.hashZipBundle(tmp)
+                if (!bundleHash.equals(expectedHash, ignoreCase = true)) {
+                    throw IllegalStateException(
+                        "hash mismatch (expected $expectedHash, got $rawHash" +
+                            if (bundleHash != null) ", bundle $bundleHash)" else ")",
+                    )
+                }
             }
         }
     }
