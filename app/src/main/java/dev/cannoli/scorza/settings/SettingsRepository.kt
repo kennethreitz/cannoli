@@ -209,6 +209,10 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         get() = jsonRead { optBoolean(KEY_REWIND_ENABLED, false) }
         set(value) = jsonWrite { put(KEY_REWIND_ENABLED, value) }
 
+    var universalCompanionDeck: Boolean
+        get() = jsonRead { optBoolean(KEY_UNIVERSAL_COMPANION_DECK, false) }
+        set(value) = jsonWrite { put(KEY_UNIVERSAL_COMPANION_DECK, value) }
+
     var dualScreenLaunching: Boolean
         get() = jsonRead { optBoolean(KEY_DUAL_SCREEN_LAUNCHING, false) }
         set(value) = jsonWrite { put(KEY_DUAL_SCREEN_LAUNCHING, value) }
@@ -500,6 +504,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         private const val KEY_KITCHEN_CODE_BYPASS = "kitchen_code_bypass"
         private const val KEY_EXPERIMENTAL_FEATURES = "experimental_features"
         private const val KEY_REWIND_ENABLED = "rewind_enabled"
+        private const val KEY_UNIVERSAL_COMPANION_DECK = "universal_companion_deck"
         private const val KEY_DUAL_SCREEN_LAUNCHING = "dual_screen_launching"
         private const val KEY_TOP_SCREEN_BLACKOUT = "top_screen_blackout"
         private const val KEY_DIM_LAUNCHER_DURING_GAMES = "dim_launcher_during_games"

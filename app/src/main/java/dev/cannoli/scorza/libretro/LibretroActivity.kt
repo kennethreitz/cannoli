@@ -381,7 +381,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var trackSotnMap = false
     private var trackPokemonFireEmerald = false
     private var trackSuperMarioWorld = false
+    private var trackUniversalCompanion = false
     private var companionFrame = 0
+    private var universalCompanionFrame = 0
 
     private val currentSlot get() = slotManager.slots[selectedSlotIndex]
     private val currentScreen get() = screenStack.lastOrNull()
@@ -509,6 +511,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         private const val TRIGGER_PRESS_THRESHOLD = 0.5f
         private const val TRIGGER_RELEASE_THRESHOLD = 0.3f
         private const val COMPANION_POLL_FRAMES = 15
+        private const val UNIVERSAL_COMPANION_POLL_FRAMES = 60
         @Volatile var isRunning = false
 
         // Last-resort keycode -> nav button mapping for IGM nav, used only when the device
@@ -630,6 +633,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         trackSotnMap = SotnMapReader.matches(gameTitle, romPath)
         trackPokemonFireEmerald = PokemonFireEmeraldReader.matches(gameTitle, romPath)
         trackSuperMarioWorld = SuperMarioWorldReader.matches(gameTitle, romPath)
+        trackUniversalCompanion =
+            settings.experimentalFeatures && settings.universalCompanionDeck
         originalRomPath = args.originalRomPath
         sramPath = args.sramPath
         stateBasePath = args.statePath
@@ -947,6 +952,23 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                             )
                                 ?.let(launchState::updateSuperMarioWorld)
                         }
+                    }
+                    if (trackUniversalCompanion &&
+                        ++universalCompanionFrame >= UNIVERSAL_COMPANION_POLL_FRAMES
+                    ) {
+                        universalCompanionFrame = 0
+                        val ra = raManager
+                        val memoryReady = ra?.isMemoryInitialized == true && ra.gameId > 0
+                        val achievements = if (memoryReady) ra?.getAchievements().orEmpty() else emptyList()
+                        launchState.updateUniversalCompanion(
+                            UniversalCompanionSnapshot(
+                                richPresence = if (memoryReady) ra?.richPresence else null,
+                                memoryReady = memoryReady,
+                                unlockedAchievements = achievements.count { it.unlocked },
+                                totalAchievements = achievements.size,
+                                observedAtMillis = System.currentTimeMillis(),
+                            )
+                        )
                     }
                     if (startupCountdown > 0 && --startupCountdown == 0) {
                         runner.setAudioMuted(false)

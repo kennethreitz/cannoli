@@ -76,6 +76,14 @@ class SettingsRepositoryTest {
         assertTrue(settings.rewindEnabled)
     }
 
+    @Test fun `universal companion deck requires an explicit opt in`() {
+        val settings = newRepo()
+
+        assertFalse(settings.universalCompanionDeck)
+        settings.universalCompanionDeck = true
+        assertTrue(settings.universalCompanionDeck)
+    }
+
     @Test fun `save sync polling defaults to three minutes and stays within safe bounds`() {
         val settings = newRepo()
 

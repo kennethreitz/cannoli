@@ -79,6 +79,7 @@ class SettingsInputHandler @Inject constructor(
             if (key == "dual_screen_launching" ||
                 key == "top_screen_blackout" ||
                 key == "dim_launcher_during_games" ||
+                key == "universal_companion_deck" ||
                 key == "experimental_features"
             ) {
                 activityActions.applyLauncherDisplayPreference()
@@ -98,6 +99,7 @@ class SettingsInputHandler @Inject constructor(
             if (key == "dual_screen_launching" ||
                 key == "top_screen_blackout" ||
                 key == "dim_launcher_during_games" ||
+                key == "universal_companion_deck" ||
                 key == "experimental_features"
             ) {
                 activityActions.applyLauncherDisplayPreference()

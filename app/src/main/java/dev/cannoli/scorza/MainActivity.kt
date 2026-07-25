@@ -102,6 +102,8 @@ import dev.cannoli.scorza.ui.components.PokemonFireEmeraldCompanion
 import dev.cannoli.scorza.ui.components.shouldShowPokemonFireEmeraldCompanion
 import dev.cannoli.scorza.ui.components.SuperMarioWorldCompanion
 import dev.cannoli.scorza.ui.components.shouldShowSuperMarioWorldCompanion
+import dev.cannoli.scorza.ui.components.UniversalCompanionDeck
+import dev.cannoli.scorza.ui.components.shouldShowUniversalCompanionDeck
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
@@ -193,6 +195,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     private var launcherSotnMapVisible by mutableStateOf(false)
     private var launcherPokemonCompanionVisible by mutableStateOf(false)
     private var launcherSuperMarioWorldCompanionVisible by mutableStateOf(false)
+    private var launcherUniversalCompanionDeckVisible by mutableStateOf(false)
     private val displayChangeHandler = Handler(Looper.getMainLooper())
     private var displayListenerRegistered = false
     private var secondaryDisplayModeObserverRegistered = false
@@ -358,6 +361,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
             val sotnMapSnapshot by launchState.sotnMap.collectAsState()
             val pokemonFireEmeraldSnapshot by launchState.pokemonFireEmerald.collectAsState()
             val superMarioWorldSnapshot by launchState.superMarioWorld.collectAsState()
+            val universalCompanionSnapshot by launchState.universalCompanion.collectAsState()
+            val saveSyncStatus by saveSyncStatusHolder.state.collectAsState()
             val boot by bootSequencer.state.collectAsState()
             LaunchedEffect(boot) {
                 if (boot is BootState.Ready) {
@@ -376,7 +381,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
                     launcherDimmed &&
                         !launcherSotnMapVisible &&
                         !launcherPokemonCompanionVisible &&
-                        !launcherSuperMarioWorldCompanionVisible
+                        !launcherSuperMarioWorldCompanionVisible &&
+                        !launcherUniversalCompanionDeckVisible
                 )
                 Surface(
                     modifier = Modifier
@@ -467,6 +473,13 @@ class MainActivity : ComponentActivity(), ActivityActions {
                             PokemonFireEmeraldCompanion(snapshot = pokemonFireEmeraldSnapshot)
                         } else if (launcherSuperMarioWorldCompanionVisible) {
                             SuperMarioWorldCompanion(snapshot = superMarioWorldSnapshot)
+                        } else if (launcherUniversalCompanionDeckVisible) {
+                            UniversalCompanionDeck(
+                                rom = launchState.lastLaunched,
+                                startedAtMillis = launchState.gameStartedAtMillis,
+                                saveSyncStatus = saveSyncStatus,
+                                snapshot = universalCompanionSnapshot,
+                            )
                         }
                     }
                 }
@@ -1140,12 +1153,25 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 displayName = launchState.lastLaunched?.displayName,
                 fileName = launchState.lastLaunched?.path?.name,
             )
+        val showUniversalCompanionDeck = shouldShowUniversalCompanionDeck(
+            experimentalFeatures = settings.experimentalFeatures,
+            dualScreenLaunching = settings.dualScreenLaunching,
+            enabled = settings.universalCompanionDeck,
+            gameActive = gameActive,
+            gameDisplayId = gameDisplayId,
+            launcherDisplayId = launcherDisplayId,
+        )
         launcherDimmed = dim
         launcherSotnMapVisible = showSotnMap
         launcherPokemonCompanionVisible = showPokemonCompanion
         launcherSuperMarioWorldCompanionVisible = showSuperMarioWorldCompanion
+        launcherUniversalCompanionDeckVisible = showUniversalCompanionDeck
         updateLauncherInputBlock(
-            dim || showSotnMap || showPokemonCompanion || showSuperMarioWorldCompanion
+            dim ||
+                showSotnMap ||
+                showPokemonCompanion ||
+                showSuperMarioWorldCompanion ||
+                showUniversalCompanionDeck
         )
     }
 

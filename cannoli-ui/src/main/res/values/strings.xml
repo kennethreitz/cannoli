@@ -172,6 +172,7 @@
     <string name="setting_kitchen_code_bypass">Kitchen Code Bypass</string>
     <string name="setting_experimental_features">Experimental Features</string>
     <string name="setting_rewind">Rewind</string>
+    <string name="setting_universal_companion_deck">Universal Companion Deck</string>
     <string name="setting_set_default_launcher">Set as Default Launcher</string>
     <string name="setting_regenerate_system_folders">Regenerate System Folders</string>
     <string name="setting_content_mode">Content Mode</string>
