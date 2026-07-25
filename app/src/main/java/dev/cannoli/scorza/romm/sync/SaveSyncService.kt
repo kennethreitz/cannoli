@@ -84,7 +84,7 @@ class SaveSyncService(
                         fileName = local.uploadFileName,
                         slot = slot,
                         emulator = emulator,
-                        contentHash = anchor?.lastUploadedHash,
+                        contentHash = local.contentHash,
                         updatedAt = isoOf(local.modifiedMillis),
                         fileSizeBytes = local.sizeBytes,
                     )
@@ -92,6 +92,7 @@ class SaveSyncService(
             )
         )
     } catch (t: Throwable) {
+        dev.cannoli.scorza.util.RommLog.write("negotiate failed [$romId/$slot]: ${errLabel(t)}")
         null
     }
 
@@ -127,12 +128,9 @@ class SaveSyncService(
             val local = resolver.resolve(tag, base)
             val anchor = store.get(gameKey, slot)
             if (local == null) {
-                // No local save: if we previously synced this game, the local copy was deleted -> pull it back.
-                return@withContext if (anchor != null) {
-                    regenerateFromServer(tag, base, gameKey, slot, romId, deviceId)
-                } else {
-                    PreLaunchOutcome.Proceed
-                }
+                // A server save may exist before this device has ever synced the game.
+                // Check RomM on launch instead of waiting for the next background sweep.
+                return@withContext regenerateFromServer(tag, base, gameKey, slot, romId, deviceId)
             }
             val response = negotiate(romId, slot, emulator, local, anchor, deviceId)
                 ?: return@withContext PreLaunchOutcome.Proceed
@@ -220,10 +218,10 @@ class SaveSyncService(
         } catch (t: Throwable) {
             return PreLaunchOutcome.Proceed
         }
-        val save = serverSaves.firstOrNull { (it.slot ?: DEFAULT_SLOT) == slot } ?: return PreLaunchOutcome.Proceed
+        val save = latestServerSave(serverSaves, slot) ?: return PreLaunchOutcome.Proceed
         val outcome = downloadOp(tag, base, gameKey, slot, romId, deviceId, downloadOpFor(save, romId, slot))
         if (outcome == PreLaunchOutcome.Proceed) {
-            dev.cannoli.scorza.util.RommLog.write("launch [$base]: regenerated save (local was deleted)")
+            dev.cannoli.scorza.util.RommLog.write("launch [$base]: pulled server save (local missing)")
         }
         return outcome
     }
@@ -313,9 +311,7 @@ class SaveSyncService(
         deviceId: String,
     ): PromoteResult {
         val head = try {
-            client.getSaves(romId, deviceId)
-                .filter { (it.slot ?: DEFAULT_SLOT) == slot }
-                .maxByOrNull { it.updatedAt }
+            latestServerSave(client.getSaves(romId, deviceId), slot)
         } catch (t: Throwable) {
             return PromoteResult.UNREACHABLE
         }
@@ -493,13 +489,15 @@ class SaveSyncService(
             scanned.add(Scanned(tag, base, gameKey, slot, emulator, romId, resolver.resolve(tag, base), store.get(gameKey, slot)))
         }
 
-        // Phase 1b: one batch negotiate for every game that has a local save.
+        // Phase 1b: one batch negotiate for the whole local library. RomM returns downloads for
+        // server saves omitted from the payload, so an empty local-save list is still meaningful.
         val withLocal = scanned.filter { it.local != null }
         val opByKey = HashMap<Pair<Int, String>, SyncOperationDto>()
+        var batchSessionId: Int? = null
         var batchReached = false
         var batchFailed = false
-        if (withLocal.isNotEmpty()) {
-            dev.cannoli.scorza.util.RommLog.write("=== sweep: negotiating ${withLocal.size} saves with RomM ===")
+        if (scanned.isNotEmpty()) {
+            dev.cannoli.scorza.util.RommLog.write("=== sweep: negotiating ${withLocal.size} local saves across ${scanned.size} games with RomM ===")
             val payload = SyncNegotiatePayload(
                 deviceId = deviceId,
                 saves = withLocal.map { s ->
@@ -508,7 +506,7 @@ class SaveSyncService(
                         fileName = s.local!!.uploadFileName,
                         slot = s.slot,
                         emulator = s.emulator,
-                        contentHash = s.anchor?.lastUploadedHash,
+                        contentHash = s.local.contentHash,
                         updatedAt = isoOf(s.local.modifiedMillis),
                         fileSizeBytes = s.local.sizeBytes,
                     )
@@ -517,13 +515,11 @@ class SaveSyncService(
             val response = try { client.negotiateSync(payload) } catch (t: Throwable) { null }
             if (response != null) {
                 batchReached = true
+                batchSessionId = response.sessionId
                 response.operations.forEach { opByKey[it.romId to (it.slot ?: DEFAULT_SLOT)] = it }
-                runCatching {
-                    val completed = response.operations.count { it.action == "download" || it.action == "upload" }
-                    client.completeSyncSession(response.sessionId, SyncCompletePayload(operationsCompleted = completed, operationsFailed = 0))
-                }
             } else {
                 batchFailed = true
+                dev.cannoli.scorza.util.RommLog.write("sweep negotiate failed")
             }
         }
 
@@ -537,7 +533,7 @@ class SaveSyncService(
             }
         }
         val reached = batchReached || getSavesReached
-        val serverContacted = withLocal.isNotEmpty() || getSavesAttempted
+        val serverContacted = scanned.isNotEmpty() || getSavesAttempted
         val attempted = scanned.count { it.local != null || it.anchor != null }
 
         // Phase 2: report the plan, sorted by platform then game name.
@@ -550,6 +546,7 @@ class SaveSyncService(
         // Phase 3: apply the actionable plans.
         dev.cannoli.scorza.util.RommLog.write("=== sweep: applying ===")
         var up = 0; var down = 0; var conflicts = 0; var error = false
+        var completedOperations = 0; var failedOperations = 0
         val failures = ArrayList<SyncFailure>()
         for (p in sorted) {
             if (p.action == SweepAction.UP_TO_DATE || p.action == SweepAction.NO_SAVE || p.action == SweepAction.UNREACHABLE) continue
@@ -562,12 +559,28 @@ class SaveSyncService(
                 else -> {}
             }
             if (!r.ok) { error = true; failures.add(SyncFailure(p.name, r.label)) }
+            if (r.direction == SyncDirection.UPLOAD || r.direction == SyncDirection.DOWNLOAD) {
+                if (r.ok) completedOperations++ else failedOperations++
+            }
             // escalate() records conflicts itself (deduped); log only real transfers and errors here.
             when {
                 !r.ok -> history.add(entry(p.gameKey, p.name, SyncDirection.ERROR, r.label))
                 r.direction == SyncDirection.UPLOAD || r.direction == SyncDirection.DOWNLOAD ->
                     history.add(entry(p.gameKey, p.name, r.direction))
                 else -> {}
+            }
+        }
+        batchSessionId?.let { sessionId ->
+            runCatching {
+                client.completeSyncSession(
+                    sessionId,
+                    SyncCompletePayload(
+                        operationsCompleted = completedOperations,
+                        operationsFailed = failedOperations,
+                    ),
+                )
+            }.onFailure {
+                dev.cannoli.scorza.util.RommLog.write("sweep session completion failed: ${errLabel(it)}")
             }
         }
 
@@ -592,17 +605,23 @@ class SaveSyncService(
             SweepPlan(s.tag, s.base, s.gameKey, s.slot, s.emulator, s.romId, action, downloadOp, conflict, dbg, promotion)
         val local = s.local
         if (local == null) {
-            // No local save: pull the server copy if one exists, even with no prior anchor
-            // (first-time restore / restore after a local delete).
+            if (batchFailed) return plan(SweepAction.UNREACHABLE)
+            if (op?.action == "download") {
+                val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
+                return plan(action, downloadOp = op)
+            }
+            // The batch response is authoritative for a first-time pull. Only make a per-ROM
+            // fallback request when Cannoli has an anchor: RomM intentionally omits an unchanged
+            // server save after a client deletion, while Cannoli's policy is to regenerate it.
+            if (s.anchor == null) return plan(SweepAction.NO_SAVE)
             val serverSaves = try {
                 client.getSaves(s.romId, deviceId).also { onReach(true) }
             } catch (t: Throwable) {
                 onReach(false)
                 return plan(SweepAction.UNREACHABLE)
             }
-            val save = serverSaves.firstOrNull { (it.slot ?: DEFAULT_SLOT) == s.slot } ?: return plan(SweepAction.NO_SAVE)
-            val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
-            return plan(action, downloadOp = downloadOpFor(save, s.romId, s.slot))
+            val save = latestServerSave(serverSaves, s.slot) ?: return plan(SweepAction.NO_SAVE)
+            return plan(SweepAction.REGENERATE, downloadOp = downloadOpFor(save, s.romId, s.slot))
         }
         promotions.get(s.gameKey, s.slot)?.let { return plan(SweepAction.PROMOTE, promotion = it) }
         if (batchFailed) return plan(SweepAction.UNREACHABLE)
@@ -689,7 +708,7 @@ class SaveSyncService(
         } catch (t: Throwable) {
             return ExecResult(SyncDirection.UPLOAD, false, "upload failed (409; ${errLabel(t)})")
         }
-        val save = serverSaves.firstOrNull { (it.slot ?: DEFAULT_SLOT) == p.slot }
+        val save = latestServerSave(serverSaves, p.slot)
             ?: return ExecResult(SyncDirection.UPLOAD, false, "upload failed (409)")
         val local = resolver.resolve(p.tag, p.name)
         if (local != null && save.contentHash != null && save.contentHash == local.contentHash) {
@@ -737,6 +756,11 @@ class SaveSyncService(
             serverUpdatedAt = save.updatedAt,
             serverContentHash = save.contentHash,
         )
+
+    private fun latestServerSave(saves: List<RommSaveDto>, slot: String): RommSaveDto? =
+        saves.asSequence()
+            .filter { (it.slot ?: DEFAULT_SLOT) == slot }
+            .maxByOrNull { runCatching { Instant.parse(it.updatedAt) }.getOrDefault(Instant.EPOCH) }
 
     private fun errLabel(t: Throwable): String {
         val code = (t as? dev.cannoli.scorza.romm.RommException)?.statusCode
