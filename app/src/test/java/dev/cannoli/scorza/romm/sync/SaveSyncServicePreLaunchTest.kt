@@ -10,7 +10,9 @@ import dev.cannoli.scorza.settings.SettingsRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -27,6 +29,7 @@ class SaveSyncServicePreLaunchTest {
     @get:Rule val tmp = TemporaryFolder()
     private lateinit var client: RommClient
     private lateinit var service: SaveSyncService
+    private lateinit var store: SaveSyncStore
     private lateinit var sd: File
 
     @Before fun setup() {
@@ -37,7 +40,7 @@ class SaveSyncServicePreLaunchTest {
         settings.rommDeviceId = "dev-1"
         val paths = CannoliPathsProvider(settings)
         val db = CannoliDatabase(paths)
-        val store = SaveSyncStore(db)
+        store = SaveSyncStore(db)
         val links = RommLinkRepository(db) { File(sd, "Roms") }
         links.upsertLink(42, "SNES/Mario.sfc", "download")
         val connStore = mockk<RommConnectionStore>(relaxed = true)
@@ -52,6 +55,22 @@ class SaveSyncServicePreLaunchTest {
     private fun writeSave() {
         File(sd, "Saves/SNES").mkdirs()
         File(sd, "Saves/SNES/Mario.srm").writeBytes("LOCAL".toByteArray())
+    }
+
+    private fun seedAnchor(lastUploadedHash: String, localContentHash: String) {
+        store.upsert(
+            SaveSyncRow(
+                gameKey = "SNES/Mario.sfc",
+                slot = DEFAULT_SLOT,
+                rommRomId = 42,
+                rommSaveId = 99,
+                lastSyncedAt = "2026-06-25T00:00:00Z",
+                lastUploadedHash = lastUploadedHash,
+                localContentHash = localContentHash,
+                serverUpdatedAt = "2026-06-25T00:00:00Z",
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
     }
 
     @Test fun download_op_writes_file_and_proceeds() = runTest {
@@ -103,6 +122,35 @@ class SaveSyncServicePreLaunchTest {
         writeSave()
         every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1, totalNoOp = 1)
         assertTrue(service.syncBeforeLaunch("SNES", "Mario", "SNES/Mario.sfc", "snes9x") is PreLaunchOutcome.Proceed)
+    }
+
+    @Test fun negotiate_sends_current_local_hash_not_previous_anchor() = runTest {
+        writeSave()
+        seedAnchor(lastUploadedHash = "previous-server-hash", localContentHash = "previous-local-hash")
+        val payload = slot<SyncNegotiatePayload>()
+        every { client.negotiateSync(capture(payload)) } returns SyncNegotiateResponse(sessionId = 1, totalNoOp = 1)
+
+        service.syncBeforeLaunch("SNES", "Mario", "SNES/Mario.sfc", "snes9x")
+
+        val currentHash = SaveHasher.hashFile(File(sd, "Saves/SNES/Mario.srm"))
+        assertEquals(currentHash, payload.captured.saves.single().contentHash)
+        assertTrue(payload.captured.saves.single().contentHash != "previous-server-hash")
+    }
+
+    @Test fun missing_local_save_pulls_newest_server_copy_without_anchor() = runTest {
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 100, romId = 42, slot = "autosave", contentHash = "old", updatedAt = "2026-06-25T00:00:00Z"),
+            RommSaveDto(id = 101, romId = 42, slot = "autosave", contentHash = "new", updatedAt = "2026-06-27T00:00:00Z"),
+        )
+        every { client.downloadSaveContent(101, "dev-1", any()) } answers {
+            thirdArg<File>().writeBytes("SERVER-NEWEST".toByteArray())
+        }
+
+        val outcome = service.syncBeforeLaunch("SNES", "Mario", "SNES/Mario.sfc", "snes9x")
+
+        assertTrue(outcome is PreLaunchOutcome.Proceed)
+        assertEquals("SERVER-NEWEST", File(sd, "Saves/SNES/Mario.srm").readText())
+        verify(exactly = 0) { client.downloadSaveContent(100, any(), any()) }
     }
 
     @Test fun download_op_null_saveId_blocks_known_stale() = runTest {

@@ -196,10 +196,37 @@ class SaveSyncSweepTest {
         assertEquals(0, summary.uploaded)
     }
 
+    @Test fun `sweep negotiates with current local hash instead of previous anchor`() = runBlocking {
+        writeSave("NEW-LOCAL")
+        seedAnchor(lastUploadedHash = "previous-server-hash", localContentHash = "previous-local-hash")
+        val payload = slot<SyncNegotiatePayload>()
+        every { client.negotiateSync(capture(payload)) } returns SyncNegotiateResponse(sessionId = 1, operations = emptyList())
+        every { client.uploadSave(any(), any(), any(), any(), any(), any()) } returns
+            RommSaveDto(id = 55, slot = "autosave", contentHash = "uploaded", updatedAt = "2026-06-26T01:00:00Z")
+
+        service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        val currentHash = SaveHasher.hashFile(File(sd, "Saves/SNES/Zelda.srm"))
+        assertEquals(currentHash, payload.captured.saves.single().contentHash)
+    }
+
     @Test fun `sweep pulls server save when local missing and no anchor`() = runBlocking {
-        // no local save, no anchor: the server copy should still be pulled down.
-        every { client.getSaves(42, "dev-1") } returns listOf(
-            RommSaveDto(id = 77, romId = 42, slot = "autosave", contentHash = "srv", updatedAt = "2026-06-26T01:00:00Z")
+        // No local save and no anchor: use the download returned by the single batch negotiate.
+        val payload = slot<SyncNegotiatePayload>()
+        every { client.negotiateSync(capture(payload)) } returns SyncNegotiateResponse(
+            sessionId = 1,
+            operations = listOf(
+                SyncOperationDto(
+                    action = "download",
+                    romId = 42,
+                    saveId = 77,
+                    fileName = "Zelda.srm",
+                    slot = "autosave",
+                    serverUpdatedAt = "2026-06-26T01:00:00Z",
+                    serverContentHash = "srv",
+                )
+            ),
+            totalDownload = 1,
         )
         every { client.downloadSaveContent(77, "dev-1", any()) } answers { thirdArg<File>().writeBytes("RESTORED".toByteArray()) }
 
@@ -209,6 +236,24 @@ class SaveSyncSweepTest {
         assertEquals(SyncDirection.DOWNLOAD, historyStore.recent().first().direction)
         assertEquals(true, store.get("SNES/Zelda.sfc", DEFAULT_SLOT) != null)
         assertEquals("RESTORED", File(sd, "Saves/SNES/Zelda.srm").readText())
+        assertEquals(emptyList<ClientSaveState>(), payload.captured.saves)
+        verify(exactly = 0) { client.getSaves(any(), any()) }
+    }
+
+    @Test fun `sweep only queries an individual game to regenerate a previously synced missing save`() = runBlocking {
+        seedAnchor(lastUploadedHash = "server", localContentHash = "server")
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1, operations = emptyList())
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 76, romId = 42, slot = "autosave", contentHash = "old", updatedAt = "2026-06-25T01:00:00Z"),
+            RommSaveDto(id = 77, romId = 42, slot = "autosave", contentHash = "new", updatedAt = "2026-06-26T01:00:00Z"),
+        )
+        every { client.downloadSaveContent(77, "dev-1", any()) } answers { thirdArg<File>().writeBytes("REGENERATED".toByteArray()) }
+
+        val summary = service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        assertEquals(1, summary.downloaded)
+        assertEquals("REGENERATED", File(sd, "Saves/SNES/Zelda.srm").readText())
+        verify(exactly = 1) { client.getSaves(42, "dev-1") }
     }
 
     @Test fun `empty download does not overwrite the local save`() = runBlocking {
@@ -224,6 +269,12 @@ class SaveSyncSweepTest {
 
         assertEquals(0, summary.downloaded)
         assertEquals("KEEP-ME", File(sd, "Saves/SNES/Zelda.srm").readText())
+        verify {
+            client.completeSyncSession(
+                1,
+                match { it.operationsCompleted == 0 && it.operationsFailed == 1 },
+            )
+        }
     }
 
     @Test fun `hash mismatch does not overwrite the local save`() = runBlocking {
