@@ -104,4 +104,32 @@ class LocalSaveResolverTest {
         assertTrue(inFlight.isFile)
         assertEquals("IN-FLIGHT", inFlight.readText())
     }
+
+    @Test fun standalone_archive_is_isolated_from_regular_core_saves() {
+        File(saves("3DS"), "Zelda.srm").writeBytes("CORE".toByteArray())
+        val archive = File(saves("3DS"), "Zelda.cannoli-standalone.zip")
+            .apply { writeBytes("STANDALONE".toByteArray()) }
+        val resolver = LocalSaveResolver(tmp.root)
+
+        assertEquals(
+            listOf("Zelda.srm"),
+            resolver.resolve("3DS", "Zelda")!!.files.map { it.name },
+        )
+        assertEquals(
+            listOf(archive),
+            resolver.resolve("3DS", "Zelda", LocalSaveMode.STANDALONE_ARCHIVE)!!.files,
+        )
+    }
+
+    @Test fun standalone_download_stays_an_archive_instead_of_extracting_into_core_saves() {
+        val downloaded = tmp.newFile("server.zip").apply { writeBytes("ARCHIVE".toByteArray()) }
+        val resolver = LocalSaveResolver(tmp.root)
+
+        resolver.applyDownload("WIIU", "Mario", downloaded, LocalSaveMode.STANDALONE_ARCHIVE)
+
+        assertEquals(
+            "ARCHIVE",
+            File(saves("WIIU"), "Mario.cannoli-standalone.zip").readText(),
+        )
+    }
 }
