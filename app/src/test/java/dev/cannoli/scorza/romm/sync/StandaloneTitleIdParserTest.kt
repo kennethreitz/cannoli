@@ -45,4 +45,21 @@ class StandaloneTitleIdParserTest {
 
         assertEquals("0005000010145C00", StandaloneTitleIdParser.cemuTitleId(wua))
     }
+
+    @Test fun `reads Vita3K title id from psvita launcher file`() {
+        val launcher = tmp.newFile("Undertale.psvita").apply {
+            writeText("\nPCSE01116\n")
+        }
+
+        assertEquals("PCSE01116", StandaloneTitleIdParser.vita3kTitleId(launcher))
+        assertEquals(
+            "PCSE01116",
+            StandaloneTitleIdParser.titleId(StandaloneSaveKind.VITA3K, launcher),
+        )
+    }
+
+    @Test fun `rejects malformed Vita3K launcher file`() {
+        val launcher = tmp.newFile("Broken.psvita").apply { writeText("undertale") }
+        assertNull(StandaloneTitleIdParser.vita3kTitleId(launcher))
+    }
 }
