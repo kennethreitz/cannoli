@@ -2,6 +2,8 @@ package dev.cannoli.scorza.romm.sync
 
 import dev.cannoli.scorza.ui.screens.buildHistoryRows
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SyncHistoryRowsTest {
@@ -42,7 +44,28 @@ class SyncHistoryRowsTest {
         val entry = SyncHistoryEntry("key", "My Game", SyncDirection.DOWNLOAD, null, now - 10_000)
         val rows = buildHistoryRows(listOf(entry), now, "just now")
         assertEquals("My Game", rows[0].name)
+        assertEquals("key", rows[0].gameKey)
         assertEquals(SyncDirection.DOWNLOAD, rows[0].direction)
+    }
+
+    @Test
+    fun `successful save state transfers can be played from history`() {
+        val now = 1_000L
+        val rows = buildHistoryRows(
+            listOf(
+                SyncHistoryEntry("gba/Aria.gba", "Aria (Save states)", SyncDirection.DOWNLOAD, null, now),
+                SyncHistoryEntry("gba/Aria.gba", "Aria (Save states)", SyncDirection.UPLOAD, null, now),
+                SyncHistoryEntry("gba/Aria.gba", "Aria", SyncDirection.DOWNLOAD, null, now),
+                SyncHistoryEntry("gba/Aria.gba", "Aria (Save states)", SyncDirection.ERROR, "failed", now),
+            ),
+            now,
+            "just now",
+        )
+
+        assertTrue(rows[0].canPlay)
+        assertTrue(rows[1].canPlay)
+        assertFalse(rows[2].canPlay)
+        assertFalse(rows[3].canPlay)
     }
 
     @Test
