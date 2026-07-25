@@ -777,13 +777,24 @@ fun DialogOverlay(
         is DialogState.SyncHistory -> {
             val colors = LocalCannoliColors.current
             val font = LocalCannoliFont.current
+            val selected = dialogState.entries.getOrNull(dialogState.selectedIndex)
             ListDialogScreen(
                 backgroundImagePath = backgroundImagePath,
                 backgroundTint = backgroundTint,
                 title = stringResource(R.string.sync_history_title),
                 listFontSize = listFontSize,
                 listLineHeight = listLineHeight,
-                rightBottomItems = emptyList(),
+                rightBottomItems = buildList {
+                    if (selected?.canPlay == true && !dialogState.syncing) {
+                        add(buttonStyle.confirm to stringResource(R.string.label_play))
+                    }
+                    add(
+                        buttonStyle.north to stringResource(
+                            if (dialogState.syncing) R.string.sync_history_syncing
+                            else R.string.sync_history_sync_now,
+                        ),
+                    )
+                },
                 buttonStyle = buttonStyle
             ) {
                 if (dialogState.entries.isEmpty()) {

@@ -1299,10 +1299,10 @@ class SaveSyncService(
                 }
                 if (!result.ok) {
                     error = true
-                    failures.add(SyncFailure("$base (Save states)", result.label))
-                    history.add(entry(gameKey, "$base (Save states)", SyncDirection.ERROR, result.label))
+                    failures.add(SyncFailure("$base$SAVE_STATE_HISTORY_SUFFIX", result.label))
+                    history.add(entry(gameKey, "$base$SAVE_STATE_HISTORY_SUFFIX", SyncDirection.ERROR, result.label))
                 } else if (result.direction == SyncDirection.UPLOAD || result.direction == SyncDirection.DOWNLOAD) {
-                    history.add(entry(gameKey, "$base (Save states)", result.direction))
+                    history.add(entry(gameKey, "$base$SAVE_STATE_HISTORY_SUFFIX", result.direction))
                 }
             }
         }
@@ -1598,7 +1598,7 @@ class SaveSyncService(
         val existing = pendingConflicts.get(gameKey, c.slot)
         // Already recorded this exact conflict (pending or dismissed) -> don't re-log it every sweep.
         if (existing != null && existing.serverContentHash == c.serverContentHash) return
-        val displayName = if (libretroStates?.isStateSlot(c.slot) == true) "$name (Save states)" else name
+        val displayName = if (libretroStates?.isStateSlot(c.slot) == true) "$name$SAVE_STATE_HISTORY_SUFFIX" else name
         pendingConflicts.upsert(
             PendingConflict(gameKey, c.slot, c.romId, displayName, c.saveId, c.serverContentHash, c.serverTime, System.currentTimeMillis(), null)
         )

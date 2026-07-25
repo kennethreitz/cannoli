@@ -35,6 +35,8 @@ class SyncScheduler(
     private var wasValidated = false
     private val sweeping = java.util.concurrent.atomic.AtomicBoolean(false)
     private val resweepRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val completionLock = Any()
+    private val completionCallbacks = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
     private val forceCooldownMs = 60_000L
 
     fun start() {
@@ -116,7 +118,15 @@ class SyncScheduler(
     }
 
     /** Force an immediate sweep (e.g. on returning from a game), bypassing the debounce window. */
-    fun syncNow() = trigger(force = true)
+    fun syncNow(onComplete: (() -> Unit)? = null) {
+        synchronized(completionLock) {
+            onComplete?.let(completionCallbacks::add)
+        }
+        // A UI request that arrives during a sweep should observe that sweep completing, not queue
+        // another full-library pass. Fire-and-forget requests (notably game exit) still request one
+        // follow-up pass so a save written during the active sweep is not missed.
+        if (!trigger(force = true, resweepIfBusy = onComplete == null)) drainCompletionCallbacks()
+    }
 
     // Registering the network callbacks makes them fire straight away, so every screen unlock used
     // to force several full sweeps. Callback- and start-driven sweeps wait out a cooldown; the
@@ -125,30 +135,35 @@ class SyncScheduler(
 
     private fun evictStaleConnections() = runCatching { http.evictConnections() }
 
-    private fun trigger(force: Boolean, cooldown: Boolean = false) {
+    private fun trigger(
+        force: Boolean,
+        cooldown: Boolean = false,
+        resweepIfBusy: Boolean = force,
+    ): Boolean {
         val now = System.currentTimeMillis()
         if (!force && !shouldSweep(now, lastSweepAt, intervalMs())) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger debounced (${(now - lastSweepAt) / 1000}s since last sweep)")
-            return
+            return false
         }
         if (cooldown && !pastForceCooldown(now, lastSweepAt, forceCooldownMs)) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger in cooldown (${(now - lastSweepAt) / 1000}s since last sweep)")
-            return
+            return false
         }
         if (!service.syncEnabled()) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, sync disabled or not connected")
-            return
+            return false
         }
         if (service.deviceIdOrNull() == null) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, device not registered")
-            return
+            return false
         }
         if (!sweeping.compareAndSet(false, true)) {
             // A forced request (network reconnect, game exit) that lands mid-sweep would
             // otherwise be lost; queue exactly one re-sweep for when the current one ends.
-            if (force) resweepRequested.set(true)
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger ${if (force) "queued" else "skipped"}, a sweep is already running")
-            return
+            if (force && resweepIfBusy) resweepRequested.set(true)
+            val action = if (force && resweepIfBusy) "queued" else "joined"
+            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger $action, a sweep is already running")
+            return false
         }
         lastSweepAt = now
         statusHolder.setActive(SaveSyncStatus.CHECKING)
@@ -167,9 +182,22 @@ class SyncScheduler(
                 )
             } finally {
                 sweeping.set(false)
-                if (resweepRequested.compareAndSet(true, false)) trigger(force = true)
+                if (resweepRequested.compareAndSet(true, false)) {
+                    if (!trigger(force = true)) drainCompletionCallbacks()
+                } else {
+                    drainCompletionCallbacks()
+                }
             }
         }
+        return true
+    }
+
+    private fun drainCompletionCallbacks() {
+        val callbacks = synchronized(completionLock) {
+            if (sweeping.get() || resweepRequested.get()) return
+            completionCallbacks.toList().also { completionCallbacks.clear() }
+        }
+        callbacks.forEach { callback -> runCatching(callback) }
     }
 
     companion object {

@@ -89,6 +89,7 @@ class DialogInputHandler @Inject constructor(
     private val syncHistoryStore: dev.cannoli.scorza.romm.sync.SyncHistoryStore,
     private val pendingConflictStore: dev.cannoli.scorza.romm.sync.PendingConflictStore,
     private val saveSyncStatusHolder: dev.cannoli.scorza.romm.sync.SaveSyncStatusHolder,
+    private val syncScheduler: dev.cannoli.scorza.romm.sync.SyncScheduler,
     private val standaloneSaveBridge: dev.cannoli.scorza.romm.sync.StandaloneSaveBridge,
     private val osdController: dev.cannoli.ui.components.OsdController,
     private val rommDevicePairing: dev.cannoli.scorza.romm.RommDevicePairing,
@@ -628,6 +629,7 @@ class DialogInputHandler @Inject constructor(
             is DialogState.RommActionsMenu -> onRommActionsConfirm(ds)
             is DialogState.RommSettingsMenu -> onRommSettingsConfirm(ds)
             is DialogState.RommSaveSyncMenu -> onRommSaveSyncConfirm(ds)
+            is DialogState.SyncHistory -> playHistorySaveState(ds)
             is DialogState.RommSavesMenu -> onRommSavesConfirm(ds)
             is DialogState.SaveBackupGames -> ds.games.getOrNull(ds.selectedIndex)?.let { openBackupList(it) }
             is DialogState.SaveBackupList -> if (ds.backups.isNotEmpty()) confirmRestore(ds)
@@ -1015,6 +1017,66 @@ class DialogInputHandler @Inject constructor(
             withContext(Dispatchers.Main) {
                 nav.dialogState.value = DialogState.SyncHistory(rows, fromSaveSyncMenu = fromSaveSyncMenu)
             }
+        }
+    }
+
+    private fun syncHistoryNow(ds: DialogState.SyncHistory) {
+        if (ds.syncing) return
+        if (!saveSyncService.syncEnabled()) {
+            osdController.show("Save sync is disabled")
+            return
+        }
+        if (saveSyncService.deviceIdOrNull() == null) {
+            osdController.show("This device is not registered with RomM")
+            return
+        }
+
+        nav.dialogState.value = ds.copy(syncing = true)
+        syncScheduler.syncNow {
+            val nowLabel = context.getString(dev.cannoli.scorza.R.string.sync_relative_now)
+            ioScope.launch {
+                val entries = syncHistoryStore.recent()
+                val rows = dev.cannoli.scorza.ui.screens.buildHistoryRows(
+                    entries,
+                    System.currentTimeMillis(),
+                    nowLabel,
+                )
+                val status = saveSyncStatusHolder.state.value
+                withContext(Dispatchers.Main) {
+                    if (nav.dialogState.value !is DialogState.SyncHistory) return@withContext
+                    nav.dialogState.value = DialogState.SyncHistory(
+                        entries = rows,
+                        fromSaveSyncMenu = ds.fromSaveSyncMenu,
+                    )
+                    val message = when (status) {
+                        dev.cannoli.ui.components.SaveSyncStatus.OFFLINE -> "Save sync is offline"
+                        dev.cannoli.ui.components.SaveSyncStatus.ERROR -> "Save sync finished with errors"
+                        dev.cannoli.ui.components.SaveSyncStatus.CONFLICT -> "Save sync finished with conflicts"
+                        else -> "Save sync complete"
+                    }
+                    osdController.show(message)
+                }
+            }
+        }
+    }
+
+    private fun playHistorySaveState(ds: DialogState.SyncHistory) {
+        val row = ds.entries.getOrNull(ds.selectedIndex)?.takeIf { it.canPlay } ?: return
+        val romPath = File(romDir(), row.gameKey).absolutePath
+        val rom = romsRepository.gameByPath(romPath)
+        if (rom == null) {
+            osdController.show("Game is no longer in the library")
+            return
+        }
+
+        nav.dialogState.value = DialogState.None
+        val recentKey = rom.path.absolutePath
+        val error = launcherActions.launchSelected(ListItem.RomItem(rom), resume = true)
+        when {
+            error != null -> nav.dialogState.value = error
+            nav.dialogState.value is DialogState.SaveSyncChecking ->
+                launcherActions.recordPendingRecent(recentKey, reorder = false)
+            else -> launcherActions.recordRecentlyPlayedByPath(recentKey)
         }
     }
 
@@ -1418,6 +1480,7 @@ class DialogInputHandler @Inject constructor(
             is DialogState.RommDownloads -> if (rommDownloader.queue.activeCount() >= 2) {
                 nav.dialogState.value = DialogState.RommConfirm(dev.cannoli.scorza.ui.screens.RommConfirmAction.CANCEL_ALL)
             }
+            is DialogState.SyncHistory -> syncHistoryNow(ds)
             else -> {}
         }
         return true

@@ -493,6 +493,8 @@
     <string name="quick_menu_sync_history">Save Sync History</string>
     <string name="sync_history_title">Save Sync History</string>
     <string name="sync_history_empty">No sync history</string>
+    <string name="sync_history_sync_now">SYNC NOW</string>
+    <string name="sync_history_syncing">SYNCING…</string>
     <string name="sync_relative_now">just now</string>
     <string name="quick_info_title">Network Info</string>
     <string name="quick_info_ip">IP Address</string>

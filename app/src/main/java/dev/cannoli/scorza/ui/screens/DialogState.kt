@@ -140,7 +140,12 @@ sealed interface DialogState {
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null) : DialogState
     data class RommPlatformToggle(val items: List<RommPlatformToggleItem>, val selectedIndex: Int = 0) : DialogState
     data class RommCollectionToggle(val items: List<RommCollectionToggleItem>, val selectedIndex: Int = 0) : DialogState
-    data class SyncHistory(val entries: List<SyncHistoryRow>, val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : DialogState
+    data class SyncHistory(
+        val entries: List<SyncHistoryRow>,
+        val selectedIndex: Int = 0,
+        val fromSaveSyncMenu: Boolean = false,
+        val syncing: Boolean = false,
+    ) : DialogState
     data class SyncErrors(val errors: List<dev.cannoli.scorza.romm.sync.SyncFailure>, val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : DialogState
     data class RommSavesMenu(val title: String, val options: List<String>, val selectedIndex: Int = 0) : DialogState
     data class SaveBackupGames(val games: List<dev.cannoli.scorza.romm.sync.SaveBackupGame>, val selectedIndex: Int = 0) : DialogState
