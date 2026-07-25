@@ -440,7 +440,9 @@ fun DialogOverlay(
         is DialogState.RommSaveSyncMenu -> {
             val rows = RommSaveSyncRow.visibleRows(dialogState.supported, dialogState.enabled, dialogState.pendingConflicts, dialogState.syncErrors, dialogState.hasBackups)
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
-            val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE || selectedRow == RommSaveSyncRow.BACKUPS
+            val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
+                selectedRow == RommSaveSyncRow.INTERVAL ||
+                selectedRow == RommSaveSyncRow.BACKUPS
             ListDialogScreen(
                 backgroundImagePath = backgroundImagePath,
                 backgroundTint = backgroundTint,
@@ -459,6 +461,17 @@ fun DialogOverlay(
                             value = stringResource(
                                 if (!dialogState.supported) R.string.romm_save_sync_needs_500
                                 else if (dialogState.enabled) R.string.value_on else R.string.value_off
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding
+                        )
+                        RommSaveSyncRow.INTERVAL -> PillRowKeyValue(
+                            label = stringResource(R.string.setting_romm_save_sync_interval),
+                            value = stringResource(
+                                R.string.romm_save_sync_interval_minutes,
+                                dialogState.syncIntervalMinutes,
                             ),
                             isSelected = isSelected,
                             fontSize = listFontSize,
@@ -1153,12 +1166,13 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
         fun visibleRows(supported: Boolean, enabled: Boolean, pendingConflicts: Int = 0, syncErrors: Int = 0, hasBackups: Boolean = false): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
                 if (supported && enabled) {
+                    add(INTERVAL)
                     add(BACKUPS)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)

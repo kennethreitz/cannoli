@@ -201,6 +201,8 @@
     <!-- RomM -->
     <string name="setting_romm_host">Host</string>
     <string name="setting_romm_save_sync">Save Sync</string>
+    <string name="setting_romm_save_sync_interval">Check Every</string>
+    <string name="romm_save_sync_interval_minutes">%1$d min</string>
     <string name="setting_romm_save_backups">Save Backups</string>
     <string name="dialog_romm_device_name_title">Name this device</string>
     <string name="romm_save_sync_needs_500">Requires RomM 5.0+</string>

@@ -23,7 +23,9 @@ class SyncScheduler(
     private val romDir: () -> File,
     private val scope: CoroutineScope,
     private val http: dev.cannoli.scorza.romm.RommHttp,
-    private val intervalMs: Long = 30 * 60 * 1000L,
+    private val intervalMs: () -> Long = {
+        pollIntervalMs(settings.rommSaveSyncIntervalMinutes)
+    },
     private val offlineRetryMs: Long = 30_000L,
 ) {
     private var callback: ConnectivityManager.NetworkCallback? = null
@@ -88,13 +90,16 @@ class SyncScheduler(
                 delay(offlineRetryMs)
                 when {
                     statusHolder.state.value == SaveSyncStatus.OFFLINE -> trigger(force = true)
-                    System.currentTimeMillis() - lastSweepAt >= intervalMs -> trigger(force = false)
+                    System.currentTimeMillis() - lastSweepAt >= intervalMs() -> trigger(force = false)
                     else -> {}
                 }
             }
         }
         statusHolder.settle(enabled = service.syncEnabled(), online = true, pendingConflicts = 0, hadError = false)
-        dev.cannoli.scorza.util.RommLog.write("scheduler: started (default + underlying callbacks, ${offlineRetryMs / 1000}s poll)")
+        dev.cannoli.scorza.util.RommLog.write(
+            "scheduler: started (default + underlying callbacks, " +
+                "${intervalMs() / 60_000L}m save poll, ${offlineRetryMs / 1000}s offline retry)"
+        )
         trigger(force = false)
     }
 
@@ -122,7 +127,7 @@ class SyncScheduler(
 
     private fun trigger(force: Boolean, cooldown: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (!force && !shouldSweep(now, lastSweepAt, intervalMs)) {
+        if (!force && !shouldSweep(now, lastSweepAt, intervalMs())) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger debounced (${(now - lastSweepAt) / 1000}s since last sweep)")
             return
         }
@@ -168,6 +173,12 @@ class SyncScheduler(
     }
 
     companion object {
+        fun pollIntervalMs(minutes: Int): Long =
+            minutes.coerceIn(
+                SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
+                SettingsRepository.MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
+            ) * 60_000L
+
         fun shouldSweep(now: Long, lastSweepAt: Long, intervalMs: Long): Boolean = now - lastSweepAt >= intervalMs
 
         fun pastForceCooldown(now: Long, lastSweepAt: Long, cooldownMs: Long): Boolean =

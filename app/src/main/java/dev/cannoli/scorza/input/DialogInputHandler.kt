@@ -764,6 +764,7 @@ class DialogInputHandler @Inject constructor(
         selectedIndex = selectedIndex,
         supported = dev.cannoli.scorza.romm.RommCapabilities.isSupported(rommStore.serverVersion),
         enabled = settings.rommSaveSyncEnabled,
+        syncIntervalMinutes = settings.rommSaveSyncIntervalMinutes,
         backupCount = settings.rommSaveBackupCount,
         pendingConflicts = pendingConflicts,
         syncErrors = saveSyncStatusHolder.errors.value.size,
@@ -792,6 +793,15 @@ class DialogInputHandler @Inject constructor(
     private fun cycleRommSaveSync(ds: DialogState.RommSaveSyncMenu, delta: Int) {
         when (dev.cannoli.scorza.ui.components.RommSaveSyncRow.visibleRows(ds.supported, ds.enabled, ds.pendingConflicts, ds.syncErrors, ds.hasBackups).getOrNull(ds.selectedIndex)) {
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.TOGGLE -> toggleSaveSync(ds)
+            dev.cannoli.scorza.ui.components.RommSaveSyncRow.INTERVAL -> {
+                val options = SettingsRepository.ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES
+                val defaultIndex = options.indexOf(SettingsRepository.DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES)
+                val idx = options.indexOf(settings.rommSaveSyncIntervalMinutes)
+                    .let { if (it < 0) defaultIndex else it }
+                val next = options[(idx + delta).mod(options.size)]
+                settings.rommSaveSyncIntervalMinutes = next
+                nav.dialogState.value = ds.copy(syncIntervalMinutes = next)
+            }
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.BACKUPS -> {
                 val options = intArrayOf(0, 3, 5, 10)
                 val idx = options.indexOf(settings.rommSaveBackupCount).let { if (it < 0) 0 else it }

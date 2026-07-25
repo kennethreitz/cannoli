@@ -5,6 +5,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SyncSchedulerTest {
+    @Test fun `poll interval uses minutes and clamps unsafe values`() {
+        assertTrue(SyncScheduler.pollIntervalMs(3) == 180_000L)
+        assertTrue(SyncScheduler.pollIntervalMs(0) == 60_000L)
+        assertTrue(SyncScheduler.pollIntervalMs(Int.MAX_VALUE) == 86_400_000L)
+    }
+
     @Test fun `debounce blocks within interval and allows after`() {
         assertFalse(SyncScheduler.shouldSweep(now = 1_000L, lastSweepAt = 900L, intervalMs = 1_800_000L))
         assertTrue(SyncScheduler.shouldSweep(now = 2_000_000L, lastSweepAt = 100L, intervalMs = 1_800_000L))

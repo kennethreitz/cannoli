@@ -67,4 +67,19 @@ class SettingsRepositoryTest {
         assertTrue(settings.topScreenBlackout)
         assertTrue(settings.dimLauncherDuringGames)
     }
+
+    @Test fun `save sync polling defaults to three minutes and stays within safe bounds`() {
+        val settings = newRepo()
+
+        assertEquals(3, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = 15
+        assertEquals(15, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = 0
+        assertEquals(SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = Int.MAX_VALUE
+        assertEquals(SettingsRepository.MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
+    }
 }

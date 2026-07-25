@@ -127,6 +127,7 @@ sealed interface DialogState {
         val selectedIndex: Int = 0,
         val supported: Boolean = true,
         val enabled: Boolean = false,
+        val syncIntervalMinutes: Int = dev.cannoli.scorza.settings.SettingsRepository.DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
         val backupCount: Int = 5,
         val pendingConflicts: Int = 0,
         val syncErrors: Int = 0,
