@@ -149,7 +149,7 @@ class SettingsInputHandler @Inject constructor(
             "icon_gallery" -> nav.push(LauncherScreen.IconGallery())
             "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(
                 shortcuts = globalOverrides.readShortcuts(),
-                experimentalFeatures = settings.experimentalFeatures,
+                rewindEnabled = settings.experimentalFeatures && settings.rewindEnabled,
             ))
             "input_tester" -> {
                 inputTesterController.enter()

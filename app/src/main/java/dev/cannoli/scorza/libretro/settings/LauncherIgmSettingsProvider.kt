@@ -61,7 +61,7 @@ class LauncherIgmSettingsProvider(
                 }
             }
             add(GenericIgmSettingsItem.Choice("advanced.ffSpeed", strings.maxFfSpeed, "${host.maxFfSpeed}x"))
-            if (host.experimentalFeatures) {
+            if (host.rewindFeatureEnabled) {
                 add(GenericIgmSettingsItem.Choice(
                     "advanced.rewindSpeed", strings.maxRewindSpeed, "${host.maxRewindSpeed}x"))
             }

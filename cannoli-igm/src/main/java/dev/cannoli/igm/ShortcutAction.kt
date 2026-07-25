@@ -19,7 +19,7 @@ enum class ShortcutAction(@StringRes val labelRes: Int) {
     OPEN_MENU(R.string.shortcut_action_open_menu)
 }
 
-fun availableShortcutActions(experimentalFeatures: Boolean): List<ShortcutAction> =
+fun availableShortcutActions(rewindEnabled: Boolean): List<ShortcutAction> =
     ShortcutAction.entries.filter {
-        experimentalFeatures || it != ShortcutAction.HOLD_REWIND
+        rewindEnabled || it != ShortcutAction.HOLD_REWIND
     }

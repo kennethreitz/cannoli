@@ -11,6 +11,7 @@ interface LauncherSettingsHost {
     val leftStickAsDpad: Boolean
     val allowDiagonals: Boolean
     val experimentalFeatures: Boolean
+    val rewindFeatureEnabled: Boolean
     val coreOptions: List<LibretroRunner.CoreOption>
     val coreCategories: List<LibretroRunner.CoreOptionCategory>
     val controllerTypes: List<LibretroRunner.ControllerType>

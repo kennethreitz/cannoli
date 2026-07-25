@@ -145,18 +145,32 @@ class LauncherIgmSettingsProviderTest {
     }
 
     @Test
-    fun `advanced shows rewind speed beside ff only for experimental features`() {
+    fun `advanced shows rewind speed beside ff only when rewind is enabled`() {
         val normal = provider().first.screen(listOf("advanced")).items.map { it.label }
         assertFalse(normal.contains("Max Rewind Speed"))
 
         val host = FakeLauncherSettingsHost().apply {
             experimentalFeatures = true
+            rewindFeatureEnabled = true
             maxRewindSpeed = 6
         }
         val row = provider(host).first.screen(listOf("advanced")).items
             .filterIsInstance<GenericIgmSettingsItem.Choice>()
             .first { it.label == "Max Rewind Speed" }
         assertEquals("6x", row.value)
+    }
+
+    @Test
+    fun `experimental features alone do not expose rewind speed`() {
+        val host = FakeLauncherSettingsHost().apply {
+            experimentalFeatures = true
+            rewindFeatureEnabled = false
+        }
+
+        assertFalse(
+            provider(host).first.screen(listOf("advanced")).items
+                .any { it.label == "Max Rewind Speed" },
+        )
     }
 
     @Test

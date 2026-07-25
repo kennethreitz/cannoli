@@ -192,6 +192,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     // A launcher setting, so it cannot change while a game is running. Read once.
     override val experimentalFeatures: Boolean by lazy { settings.experimentalFeatures }
+    override val rewindFeatureEnabled: Boolean by lazy {
+        experimentalFeatures && settings.rewindEnabled
+    }
 
     override var allowDiagonals by mutableStateOf(true)
 
@@ -296,7 +299,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     }
 
     private fun setRewind(enabled: Boolean) {
-        if (enabled && !experimentalFeatures) return
+        if (enabled && !rewindFeatureEnabled) return
         if (enabled && fastForwarding) setFastForward(false)
         rewinding = enabled
         renderer.rewinding = enabled
@@ -906,7 +909,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     backend.sharpness = sharpness
                     backend.screenEffect = screenEffect
                     backend.debugHud = debugHud
-                    backend.rewindEnabled = experimentalFeatures
+                    backend.rewindEnabled = rewindFeatureEnabled
                     backend.rewindFrames = maxRewindSpeed
                     backend.overlayPath = resolveOverlayPath()
                     backend.shaderPresetPath = resolveShaderPresetPath()
@@ -1707,7 +1710,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         val portKeys = portPressedKeys[port]
         val consumed = portConsumedKeys[port]
         for ((action, chord) in shortcuts) {
-            if (action == ShortcutAction.HOLD_REWIND && !experimentalFeatures) continue
+            if (action == ShortcutAction.HOLD_REWIND && !rewindFeatureEnabled) continue
             if (chord.isEmpty() || !portKeys.containsAll(chord)) continue
             if (chord.any { it in consumed }) continue
             when (action) {
@@ -2585,7 +2588,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     // --- Shortcuts ---
 
     private val configurableShortcutActions: List<ShortcutAction>
-        get() = availableShortcutActions(experimentalFeatures)
+        get() = availableShortcutActions(rewindFeatureEnabled)
 
     private fun wireBindingController() {
         bindingController.onProgress = { keys, elapsedMs ->
