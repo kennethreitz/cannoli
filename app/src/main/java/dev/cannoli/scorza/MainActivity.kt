@@ -257,6 +257,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 cemuLinked = standaloneSaveBridge.isLinked(
                     dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CEMU,
                 ),
+                vita3kLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.VITA3K,
+                ),
             )
         }
         if (linked) syncScheduler.syncNow()

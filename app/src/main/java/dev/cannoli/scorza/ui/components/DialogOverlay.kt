@@ -446,6 +446,7 @@ fun DialogOverlay(
                 dialogState.hasBackups,
                 dialogState.citraAvailable,
                 dialogState.cemuAvailable,
+                dialogState.vita3kAvailable,
             )
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
             val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
@@ -542,6 +543,17 @@ fun DialogOverlay(
                             label = stringResource(R.string.romm_cemu_saves_experimental),
                             value = stringResource(
                                 if (dialogState.cemuLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.VITA3K -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_vita3k_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.vita3kLinked) R.string.romm_save_folder_connected
                                 else R.string.romm_save_folder_connect,
                             ),
                             isSelected = isSelected,
@@ -1211,7 +1223,7 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
         fun visibleRows(
             supported: Boolean,
@@ -1221,6 +1233,7 @@ enum class RommSaveSyncRow {
             hasBackups: Boolean = false,
             citraAvailable: Boolean = false,
             cemuAvailable: Boolean = false,
+            vita3kAvailable: Boolean = false,
         ): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
@@ -1229,6 +1242,7 @@ enum class RommSaveSyncRow {
                     add(BACKUPS)
                     if (citraAvailable) add(CITRA)
                     if (cemuAvailable) add(CEMU)
+                    if (vita3kAvailable) add(VITA3K)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)
                     if (syncErrors > 0) add(ERRORS)

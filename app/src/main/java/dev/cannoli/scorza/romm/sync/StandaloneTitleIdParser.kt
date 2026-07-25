@@ -14,6 +14,7 @@ object StandaloneTitleIdParser {
     fun titleId(kind: StandaloneSaveKind, rom: File): String? = when (kind) {
         StandaloneSaveKind.CITRA_MMJ -> citraTitleId(rom)
         StandaloneSaveKind.CEMU -> cemuTitleId(rom)
+        StandaloneSaveKind.VITA3K -> vita3kTitleId(rom)
     }
 
     fun citraTitleId(rom: File): String? = runCatching {
@@ -55,4 +56,14 @@ object StandaloneTitleIdParser {
 
     internal fun parseCemuMeta(xml: String): String? =
         cemuTitleId.find(xml)?.groupValues?.get(1)?.uppercase()
+
+    fun vita3kTitleId(rom: File): String? = runCatching {
+        rom.useLines { lines ->
+            lines.firstNotNullOfOrNull { line ->
+                VITA_TITLE_ID.matchEntire(line.trim())?.value?.uppercase()
+            }
+        }
+    }.getOrNull()
+
+    private val VITA_TITLE_ID = Regex("""[A-Za-z]{4}[0-9]{5}""")
 }

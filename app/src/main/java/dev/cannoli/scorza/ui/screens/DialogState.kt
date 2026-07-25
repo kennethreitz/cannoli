@@ -136,6 +136,8 @@ sealed interface DialogState {
         val citraLinked: Boolean = false,
         val cemuAvailable: Boolean = false,
         val cemuLinked: Boolean = false,
+        val vita3kAvailable: Boolean = false,
+        val vita3kLinked: Boolean = false,
     ) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null) : DialogState
     data class RommPlatformToggle(val items: List<RommPlatformToggleItem>, val selectedIndex: Int = 0) : DialogState

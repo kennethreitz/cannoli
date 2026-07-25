@@ -5,7 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class StandaloneSaveKindTest {
-    @Test fun `matches Citra MMJ and Cemu identities`() {
+    @Test fun `matches supported standalone emulator identities`() {
         assertEquals(
             StandaloneSaveKind.CITRA_MMJ,
             StandaloneSaveKind.forGame("3DS", "Citra MMJ"),
@@ -13,6 +13,10 @@ class StandaloneSaveKindTest {
         assertEquals(
             StandaloneSaveKind.CEMU,
             StandaloneSaveKind.forGame("wiiu", "cemu"),
+        )
+        assertEquals(
+            StandaloneSaveKind.VITA3K,
+            StandaloneSaveKind.forGame("psvita", "Vita3K"),
         )
     }
 
@@ -36,6 +40,14 @@ class StandaloneSaveKindTest {
                 StandaloneSaveKind.CEMU.documentAuthority,
                 "root/",
                 "root/mlc01",
+            ),
+        )
+        assertEquals(
+            "primary:Vita3K/vita/ux0",
+            safeStandaloneDocumentId(
+                StandaloneSaveKind.VITA3K.documentAuthority,
+                "primary:Vita3K/vita",
+                "primary:Vita3K/vita/ux0",
             ),
         )
     }

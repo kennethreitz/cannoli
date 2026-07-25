@@ -53,24 +53,28 @@ class StandaloneSaveBridge @Inject constructor(
     fun isLinked(kind: StandaloneSaveKind): Boolean =
         treeUri(kind) != null
 
-    fun accessIntent(kind: StandaloneSaveKind): Intent =
-        Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-            .putExtra(
-                DocumentsContract.EXTRA_INITIAL_URI,
-                DocumentsContract.buildRootUri(kind.documentAuthority, DOCUMENT_ROOT_ID),
-            )
+    fun accessIntent(kind: StandaloneSaveKind): Intent {
+        val initialUri = kind.initialDocumentId?.let {
+            DocumentsContract.buildDocumentUri(kind.documentAuthority, it)
+        } ?: DocumentsContract.buildRootUri(
+            kind.documentAuthority,
+            requireNotNull(kind.providerRootId),
+        )
+        return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            .putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
             .addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
             )
+    }
 
     fun persistAccess(kind: StandaloneSaveKind, uri: Uri, flags: Int): Boolean {
         if (uri.authority != kind.documentAuthority) return false
         val documentId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
             ?: return false
-        if (documentId.trimEnd('/') != DOCUMENT_ROOT_ID) return false
+        if (kind.providerRootId != null && documentId.trimEnd('/') != kind.providerRootId) return false
         val takeFlags = flags and (
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
@@ -79,6 +83,11 @@ class StandaloneSaveBridge @Inject constructor(
         ) return false
         return runCatching {
             resolver.takePersistableUriPermission(uri, takeFlags)
+            if (!isValidTree(kind, uri)) {
+                resolver.releasePersistableUriPermission(uri, takeFlags)
+                return@runCatching false
+            }
+            treePreferences.edit().putString(treePreferenceKey(kind), uri.toString()).apply()
             true
         }.getOrDefault(false)
     }
@@ -160,13 +169,40 @@ class StandaloneSaveBridge @Inject constructor(
         if (kind != null) LocalSaveMode.STANDALONE_ARCHIVE else LocalSaveMode.NORMAL
 
     private fun treeUri(kind: StandaloneSaveKind): Uri? =
-        resolver.persistedUriPermissions
-            .lastOrNull {
-                it.uri.authority == kind.documentAuthority &&
-                    it.isReadPermission &&
-                    it.isWritePermission
+        treePreferences.getString(treePreferenceKey(kind), null)
+            ?.let(Uri::parse)
+            ?.takeIf { stored ->
+                resolver.persistedUriPermissions.any {
+                    it.uri == stored && it.isReadPermission && it.isWritePermission
+                } && isValidTree(kind, stored)
             }
-            ?.uri
+            ?: resolver.persistedUriPermissions
+                .lastOrNull {
+                    it.uri.authority == kind.documentAuthority &&
+                        it.isReadPermission &&
+                        it.isWritePermission &&
+                        kind.providerRootId != null &&
+                        runCatching {
+                            DocumentsContract.getTreeDocumentId(it.uri).trimEnd('/') == kind.providerRootId
+                        }.getOrDefault(false)
+                }
+                ?.uri
+
+    private val treePreferences by lazy {
+        context.getSharedPreferences(TREE_PREFERENCES, Context.MODE_PRIVATE)
+    }
+
+    private fun treePreferenceKey(kind: StandaloneSaveKind): String =
+        "tree_${kind.name.lowercase()}"
+
+    private fun isValidTree(kind: StandaloneSaveKind, uri: Uri): Boolean = runCatching {
+        val docs = DocumentTree(resolver, uri)
+        when (kind) {
+            StandaloneSaveKind.VITA3K ->
+                docs.findPath(docs.root, listOf("ux0", "user", "00", "savedata")) != null
+            else -> true
+        }
+    }.getOrDefault(false)
 
     private fun standaloneArchive(tag: String, base: String): File =
         File(File(root, "Saves/$tag"), "$base$STANDALONE_SUFFIX")
@@ -203,6 +239,10 @@ class StandaloneSaveBridge @Inject constructor(
                 titleId.substring(8).lowercase(),
             ),
         )
+        StandaloneSaveKind.VITA3K -> docs.findPath(
+            docs.root,
+            listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
+        )
     }
 
     private fun createSaveRoot(
@@ -222,6 +262,10 @@ class StandaloneSaveBridge @Inject constructor(
                 titleId.substring(0, 8).lowercase(),
                 titleId.substring(8).lowercase(),
             ),
+        )
+        StandaloneSaveKind.VITA3K -> docs.ensurePath(
+            docs.root,
+            listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
         )
     }
 
@@ -370,6 +414,7 @@ class StandaloneSaveBridge @Inject constructor(
 
     private companion object {
         const val DOCUMENT_ROOT_ID = "root"
+        const val TREE_PREFERENCES = "standalone_save_trees"
         const val STANDALONE_SUFFIX = ".cannoli-standalone.zip"
         const val MANIFEST_NAME = "cannoli-standalone-save.txt"
         const val ARCHIVE_FORMAT = 1

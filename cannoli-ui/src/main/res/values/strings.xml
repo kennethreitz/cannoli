@@ -209,6 +209,7 @@
     <string name="setting_romm_save_backups">Save Backups</string>
     <string name="romm_citra_saves_experimental">Citra MMJ Saves (Experimental)</string>
     <string name="romm_cemu_saves_experimental">Cemu Saves (Experimental)</string>
+    <string name="romm_vita3k_saves_experimental">Vita3K Saves (Experimental)</string>
     <string name="romm_save_folder_connect">Connect</string>
     <string name="romm_save_folder_connected">Connected</string>
     <string name="romm_standalone_saves_connected">%1$s saves connected</string>
