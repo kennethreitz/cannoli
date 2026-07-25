@@ -1127,8 +1127,22 @@ class LibretroActivity : ComponentActivity() {
             event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER).coerceIn(0f, 1f),
             event.getAxisValue(android.view.MotionEvent.AXIS_GAS).coerceIn(0f, 1f),
         )
-        syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_L2, leftTrigger, triggerL2HeldDevices)
-        syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_R2, rightTrigger, triggerR2HeldDevices)
+        syncSyntheticTrigger(
+            deviceId = event.deviceId,
+            port = port,
+            canonical = dev.cannoli.scorza.input.CanonicalButton.BTN_L2,
+            keyCode = KeyEvent.KEYCODE_BUTTON_L2,
+            value = leftTrigger,
+            held = triggerL2HeldDevices,
+        )
+        syncSyntheticTrigger(
+            deviceId = event.deviceId,
+            port = port,
+            canonical = dev.cannoli.scorza.input.CanonicalButton.BTN_R2,
+            keyCode = KeyEvent.KEYCODE_BUTTON_R2,
+            value = rightTrigger,
+            held = triggerR2HeldDevices,
+        )
 
         val stickX = event.getAxisValue(android.view.MotionEvent.AXIS_X)
         val stickY = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
@@ -1524,6 +1538,7 @@ class LibretroActivity : ComponentActivity() {
     private fun syncSyntheticTrigger(
         deviceId: Int,
         port: Int,
+        canonical: dev.cannoli.scorza.input.CanonicalButton,
         keyCode: Int,
         value: Float,
         held: MutableSet<Int>,
@@ -1532,9 +1547,15 @@ class LibretroActivity : ComponentActivity() {
         if (value > TRIGGER_PRESS_THRESHOLD && !wasHeld) {
             held.add(deviceId)
             pressSyntheticKey(port, keyCode)
+            if (keyCode !in portConsumedKeys[port]) {
+                evaluatorForPort(port)?.evaluateSyntheticButton(canonical, pressed = true)
+                pushPortMask(port)
+            }
         } else if (value < TRIGGER_RELEASE_THRESHOLD && wasHeld) {
             held.remove(deviceId)
             releasePortKey(port, keyCode)
+            evaluatorForPort(port)?.evaluateSyntheticButton(canonical, pressed = false)
+            pushPortMask(port)
         }
     }
 
