@@ -6,6 +6,7 @@ interface LauncherSettingsHost {
     val hasShaderParams: Boolean
     val maxFfSpeed: Int
     val maxRewindSpeed: Int
+    val rewindMemoryMb: Int
     val showFpsBaseline: Boolean
     val debugHud: Boolean
     val leftStickAsDpad: Boolean
@@ -29,6 +30,7 @@ interface LauncherSettingsHost {
     fun cycleOverlay(direction: Int)
     fun cycleFfSpeed(direction: Int)
     fun cycleRewindSpeed(direction: Int)
+    fun cycleRewindMemory(direction: Int)
     fun toggleShowFps()
     fun toggleDebugHud()
     fun toggleLeftStickAsDpad()

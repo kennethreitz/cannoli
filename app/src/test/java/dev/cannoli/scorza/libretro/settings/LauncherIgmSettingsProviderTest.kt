@@ -148,16 +148,18 @@ class LauncherIgmSettingsProviderTest {
     fun `advanced shows rewind speed beside ff only when rewind is enabled`() {
         val normal = provider().first.screen(listOf("advanced")).items.map { it.label }
         assertFalse(normal.contains("Max Rewind Speed"))
+        assertFalse(normal.contains("Rewind Memory"))
 
         val host = FakeLauncherSettingsHost().apply {
             experimentalFeatures = true
             rewindFeatureEnabled = true
             maxRewindSpeed = 6
+            rewindMemoryMb = 512
         }
-        val row = provider(host).first.screen(listOf("advanced")).items
+        val rows = provider(host).first.screen(listOf("advanced")).items
             .filterIsInstance<GenericIgmSettingsItem.Choice>()
-            .first { it.label == "Max Rewind Speed" }
-        assertEquals("6x", row.value)
+        assertEquals("6x", rows.first { it.label == "Max Rewind Speed" }.value)
+        assertEquals("512 MB", rows.first { it.label == "Rewind Memory" }.value)
     }
 
     @Test
@@ -170,6 +172,10 @@ class LauncherIgmSettingsProviderTest {
         assertFalse(
             provider(host).first.screen(listOf("advanced")).items
                 .any { it.label == "Max Rewind Speed" },
+        )
+        assertFalse(
+            provider(host).first.screen(listOf("advanced")).items
+                .any { it.label == "Rewind Memory" },
         )
     }
 
@@ -210,13 +216,23 @@ class LauncherIgmSettingsProviderTest {
         val (p, host) = provider()
         p.cycle("advanced.ffSpeed", 1)
         p.cycle("advanced.rewindSpeed", -1)
+        p.cycle("advanced.rewindMemory", 1)
         p.cycle("advanced.showFps", 1)
         p.cycle("advanced.debugHud", -1)
         p.cycle("advanced.controller.2", 1)
         p.cycle("input.leftStick", 1)
         p.cycle("input.dpadMode", -1)
         assertEquals(
-            listOf("ff:1", "rewind:-1", "showFps", "debugHud", "port2:1", "leftStick", "dpadMode"),
+            listOf(
+                "ff:1",
+                "rewind:-1",
+                "rewindMemory:1",
+                "showFps",
+                "debugHud",
+                "port2:1",
+                "leftStick",
+                "dpadMode",
+            ),
             host.calls,
         )
     }

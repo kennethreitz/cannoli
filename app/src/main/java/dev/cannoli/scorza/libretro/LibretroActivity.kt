@@ -166,6 +166,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     override var showFpsBaseline by mutableStateOf(false)
     override var maxFfSpeed by mutableIntStateOf(4)
     override var maxRewindSpeed by mutableIntStateOf(4)
+    override var rewindMemoryMb by mutableIntStateOf(DEFAULT_REWIND_MEMORY_MB)
     private var overlay by mutableStateOf("")
     private var overlayImages = emptyList<String>()
 
@@ -909,6 +910,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     backend.debugHud = debugHud
                     backend.rewindEnabled = rewindFeatureEnabled
                     backend.rewindFrames = maxRewindSpeed
+                    backend.rewindMemoryMb = rewindMemoryMb
                     backend.overlayPath = resolveOverlayPath()
                     backend.shaderPresetPath = resolveShaderPresetPath()
                     backend.portraitMarginPx = settings.portraitMarginPx
@@ -925,6 +927,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     ShaderPipeline.logger = { msg -> sessionLog.log(msg) }
                 }
                 configureBackend(glesBackend)
+                sessionLog.log(
+                    "rewind config: enabled=$rewindFeatureEnabled " +
+                        "speed=${maxRewindSpeed}x memory=${rewindMemoryMb}MB"
+                )
                 var startupCountdown = 10
                 // HACK: FBNeo has a bug where vertical arcade games initialize with wrong
                 // framebuffer orientation despite reporting correct rotation. Toggling the
@@ -2575,6 +2581,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (rewinding) renderer.rewindFrames = maxRewindSpeed
     }
 
+    override fun cycleRewindMemory(direction: Int) {
+        val idx = REWIND_MEMORY_OPTIONS_MB.indexOf(rewindMemoryMb).coerceAtLeast(0)
+        rewindMemoryMb = REWIND_MEMORY_OPTIONS_MB[
+            (idx + direction + REWIND_MEMORY_OPTIONS_MB.size) % REWIND_MEMORY_OPTIONS_MB.size
+        ]
+        renderer.rewindMemoryMb = rewindMemoryMb
+        invalidateRewindHistory()
+    }
+
     // --- Emulator ---
 
     private fun loadVisibleCoreOptions(): List<LibretroRunner.CoreOption> {
@@ -2778,6 +2793,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             showFps = showFpsBaseline,
             maxFfSpeed = maxFfSpeed,
             maxRewindSpeed = maxRewindSpeed,
+            rewindMemoryMb = rewindMemoryMb,
             shaderPreset = shaderPreset,
             overlay = overlay,
             coreOptions = optionMap,
@@ -2821,6 +2837,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         showFpsBaseline = settings.showFps
         maxFfSpeed = settings.maxFfSpeed
         maxRewindSpeed = settings.maxRewindSpeed
+        rewindMemoryMb = settings.rewindMemoryMb
         shaderPreset = settings.shaderPreset
         overlay = settings.overlay
         shortcutSource = settings.shortcutSource

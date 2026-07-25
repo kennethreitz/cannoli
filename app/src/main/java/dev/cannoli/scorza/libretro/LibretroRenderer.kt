@@ -26,7 +26,9 @@ enum class Sharpness { SHARP, SOFT }
 enum class ScreenEffect { NONE, SHADER }
 
 private const val FPS_EMA_ALPHA = 0.05
-private const val REWIND_BUFFER_BYTES = 64 * 1024 * 1024
+internal const val DEFAULT_REWIND_MEMORY_MB = 256
+internal val REWIND_MEMORY_OPTIONS_MB = listOf(64, 128, 256, 512)
+private const val BYTES_PER_MEGABYTE = 1024 * 1024
 
 class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Renderer {
 
@@ -35,6 +37,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     @Volatile var rewindEnabled = false
     @Volatile var rewinding = false
     @Volatile var rewindFrames = 4
+    @Volatile var rewindMemoryMb = DEFAULT_REWIND_MEMORY_MB
     @Volatile var rewindHistoryAvailable = false; private set
     @Volatile var rewindSupported = true; private set
     @Volatile var coreTargetFps = 60.0
@@ -422,7 +425,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
 
     private fun captureRewindState() {
         if (!rewindEnabled || !rewindSupported) return
-        when (runner.captureRewindState(REWIND_BUFFER_BYTES)) {
+        when (runner.captureRewindState(rewindMemoryMb * BYTES_PER_MEGABYTE)) {
             1 -> rewindHistoryAvailable = true
             -1 -> {
                 rewindSupported = false
