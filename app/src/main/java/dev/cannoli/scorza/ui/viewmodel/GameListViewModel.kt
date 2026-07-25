@@ -16,6 +16,7 @@ import dev.cannoli.scorza.model.Collection
 import dev.cannoli.scorza.model.CollectionType
 import dev.cannoli.scorza.model.GameSearchQuery
 import dev.cannoli.scorza.model.ListItem
+import dev.cannoli.scorza.romm.sync.RommFavoritesSync
 import dev.cannoli.scorza.util.TextNormalizer
 import dev.cannoli.scorza.util.sortedNatural
 import dev.cannoli.ui.components.OsdController
@@ -100,6 +101,7 @@ class GameListViewModel @Inject constructor(
     private val scanScheduler: ScanScheduler,
     private val cannoliPaths: CannoliPathsProvider,
     private val osdController: OsdController,
+    private val rommFavoritesSync: RommFavoritesSync,
     @ApplicationContext private val context: android.content.Context,
 ) {
     private val resources: android.content.res.Resources get() = context.resources
@@ -143,6 +145,11 @@ class GameListViewModel @Inject constructor(
         scope.launch {
             scanScheduler.results.collectLatest { result ->
                 handleRescanResult(result)
+            }
+        }
+        scope.launch {
+            rommFavoritesSync.localChanges.collectLatest {
+                reload()
             }
         }
     }

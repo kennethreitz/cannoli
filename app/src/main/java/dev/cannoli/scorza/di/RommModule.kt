@@ -296,5 +296,16 @@ object RommModule {
         paths: CannoliPathsProvider,
         @IoScope ioScope: CoroutineScope,
         http: RommHttp,
-    ): SyncScheduler = SyncScheduler(context, service, statusHolder, platformConfig, settings, { paths.romDir }, ioScope, http)
+        favorites: dev.cannoli.scorza.romm.sync.RommFavoritesSync,
+    ): SyncScheduler = SyncScheduler(
+        context,
+        service,
+        statusHolder,
+        platformConfig,
+        settings,
+        { paths.romDir },
+        ioScope,
+        http,
+        favorites = favorites,
+    )
 }

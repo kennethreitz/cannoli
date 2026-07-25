@@ -27,6 +27,7 @@ class SyncScheduler(
         pollIntervalMs(settings.rommSaveSyncIntervalMinutes)
     },
     private val offlineRetryMs: Long = 30_000L,
+    private val favorites: RommFavoritesSync? = null,
 ) {
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var underlyingCallback: ConnectivityManager.NetworkCallback? = null
@@ -149,13 +150,15 @@ class SyncScheduler(
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger in cooldown (${(now - lastSweepAt) / 1000}s since last sweep)")
             return false
         }
-        if (!service.syncEnabled()) {
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, sync disabled or not connected")
+        val saveSyncEnabled = service.syncEnabled()
+        val favoriteSyncEnabled = favorites?.syncEnabled() == true
+        if (!saveSyncEnabled && !favoriteSyncEnabled) {
+            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, no RomM sync is enabled")
             return false
         }
-        if (service.deviceIdOrNull() == null) {
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, device not registered")
-            return false
+        val runSaveSync = saveSyncEnabled && service.deviceIdOrNull() != null
+        if (saveSyncEnabled && !runSaveSync) {
+            dev.cannoli.scorza.util.RommLog.write("scheduler: save sync skipped, device not registered")
         }
         if (!sweeping.compareAndSet(false, true)) {
             // A forced request (network reconnect, game exit) that lands mid-sweep would
@@ -166,11 +169,12 @@ class SyncScheduler(
             return false
         }
         lastSweepAt = now
-        statusHolder.setActive(SaveSyncStatus.CHECKING)
+        if (runSaveSync) statusHolder.setActive(SaveSyncStatus.CHECKING)
         dev.cannoli.scorza.util.RommLog.write("scheduler: trigger fired (force=$force)")
         scope.launch {
             try {
-                service.sweep(rommResolveGame(platformResolver, romDir()))
+                favorites?.sync()
+                if (runSaveSync) service.sweep(rommResolveGame(platformResolver, romDir()))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {
