@@ -4,6 +4,9 @@ import androidx.sqlite.SQLiteStatement
 import dev.cannoli.scorza.model.CollectionType
 
 class CollectionsRepository(private val db: CannoliDatabase) {
+    @Volatile
+    var favoriteMutationListener: (() -> Unit)? = null
+
     data class CollectionRow(
         val id: Long,
         val displayName: String,
@@ -66,12 +69,17 @@ class CollectionsRepository(private val db: CannoliDatabase) {
             "INSERT INTO collection_members (collection_id, rom_id, app_id, sort_order) VALUES (?, ?, ?, ?)",
             collectionId, romId, appId, nextOrder.toLong(),
         )
+        if (collectionId == favoritesId()) favoriteMutationListener?.invoke()
     }
 
-    fun removeMember(collectionId: Long, ref: LibraryRef) = db.execute(
-        "DELETE FROM collection_members WHERE collection_id = ? AND ${ref.column()} = ?",
-        collectionId, ref.id,
-    )
+    fun removeMember(collectionId: Long, ref: LibraryRef) {
+        val favoriteChanged = collectionId == favoritesId() && isMember(collectionId, ref)
+        db.execute(
+            "DELETE FROM collection_members WHERE collection_id = ? AND ${ref.column()} = ?",
+            collectionId, ref.id,
+        )
+        if (favoriteChanged) favoriteMutationListener?.invoke()
+    }
 
     fun setMemberOrder(collectionId: Long, orderedRefs: List<LibraryRef>) = db.transaction { conn ->
         orderedRefs.forEachIndexed { index, ref ->

@@ -42,4 +42,16 @@ class RommConnectionStoreCollectionsTest {
             newStore().enabledCollectionGroups()
         )
     }
+
+    @Test fun `favorite sync baseline persists and is cleared for another server`() {
+        val store = newStore()
+        store.favoriteSyncBaseline = null
+        store.host = "https://one.example"
+        store.favoriteSyncBaseline = setOf(4, 7)
+
+        assertEquals(setOf(4, 7), newStore().favoriteSyncBaseline)
+
+        store.host = "https://two.example"
+        assertEquals(null, store.favoriteSyncBaseline)
+    }
 }

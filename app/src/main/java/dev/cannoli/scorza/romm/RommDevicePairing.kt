@@ -128,7 +128,7 @@ class RommDevicePairing(
     private companion object {
         const val SLOW_DOWN_STEP_SECONDS = 5
         val REQUESTED_SCOPES = listOf(
-            "me.read", "platforms.read", "roms.read", "collections.read", "firmware.read",
+            "me.read", "platforms.read", "roms.read", "collections.read", "collections.write", "firmware.read",
             "assets.read", "assets.write", "devices.read", "devices.write",
         )
     }

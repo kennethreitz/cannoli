@@ -17,7 +17,11 @@ class RommConnectionStore @Inject constructor(@ApplicationContext context: Conte
 
     var host: String
         get() = prefs.getString(KEY_HOST, "") ?: ""
-        set(value) { prefs.edit().putString(KEY_HOST, value.trim().trimEnd('/')).apply() }
+        set(value) {
+            val normalized = value.trim().trimEnd('/')
+            if (normalized != host) clearFavoriteSyncBaseline()
+            prefs.edit().putString(KEY_HOST, normalized).apply()
+        }
 
     var allowSelfSigned: Boolean
         get() = prefs.getBoolean(KEY_SELF_SIGNED, false)
@@ -60,7 +64,13 @@ class RommConnectionStore @Inject constructor(@ApplicationContext context: Conte
 
     var username: String?
         get() = prefs.getString(KEY_USERNAME, null)?.ifEmpty { null }
-        set(value) { prefs.edit().run { if (value.isNullOrEmpty()) remove(KEY_USERNAME) else putString(KEY_USERNAME, value); apply() } }
+        set(value) {
+            if (value != username) clearFavoriteSyncBaseline()
+            prefs.edit().run {
+                if (value.isNullOrEmpty()) remove(KEY_USERNAME) else putString(KEY_USERNAME, value)
+                apply()
+            }
+        }
 
     var serverVersion: String?
         get() = prefs.getString(KEY_SERVER_VERSION, null)?.ifEmpty { null }
@@ -73,6 +83,26 @@ class RommConnectionStore @Inject constructor(@ApplicationContext context: Conte
 
     val isConfigured: Boolean get() = host.isNotEmpty() && !token.isNullOrEmpty()
 
+    var favoriteSyncBaseline: Set<Int>?
+        get() {
+            if (!prefs.contains(KEY_FAVORITE_SYNC_BASELINE)) return null
+            return prefs.getStringSet(KEY_FAVORITE_SYNC_BASELINE, emptySet())
+                ?.mapNotNull(String::toIntOrNull)
+                ?.toSet()
+                ?: emptySet()
+        }
+        set(value) {
+            prefs.edit().run {
+                if (value == null) remove(KEY_FAVORITE_SYNC_BASELINE)
+                else putStringSet(KEY_FAVORITE_SYNC_BASELINE, value.mapTo(mutableSetOf(), Int::toString))
+                apply()
+            }
+        }
+
+    fun clearFavoriteSyncBaseline() {
+        prefs.edit().remove(KEY_FAVORITE_SYNC_BASELINE).apply()
+    }
+
     fun clearToken() { creds.edit().remove(KEY_TOKEN).apply() }
 
     fun disconnect() {
@@ -80,6 +110,7 @@ class RommConnectionStore @Inject constructor(@ApplicationContext context: Conte
         username = null
         serverVersion = null
         scanMedia = emptySet()
+        clearFavoriteSyncBaseline()
     }
 
     private companion object {
@@ -93,5 +124,6 @@ class RommConnectionStore @Inject constructor(@ApplicationContext context: Conte
         const val KEY_COLL_USER = "coll_user"
         const val KEY_COLL_VIRTUAL = "coll_virtual"
         const val KEY_COLL_SMART = "coll_smart"
+        const val KEY_FAVORITE_SYNC_BASELINE = "favorite_sync_baseline"
     }
 }

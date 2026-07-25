@@ -99,9 +99,42 @@ class RommClient(
                 .map { RommNetworkCollection(it.id, group, it.name, it.romIds, it.romCount, it.type) }
         } else {
             execute(request, ListSerializer(CollectionDto.serializer()))
-                .map { RommNetworkCollection(it.id.toString(), group, it.name, it.romIds, it.romCount) }
+                .map {
+                    RommNetworkCollection(
+                        it.id.toString(),
+                        group,
+                        it.name,
+                        it.romIds,
+                        it.romCount,
+                        isFavorite = it.isFavorite,
+                    )
+                }
         }
     }
+
+    fun getFavoriteCollection(): CollectionDto? {
+        val request = Request.Builder().url(endpoint("/api/collections")).get().build()
+        return execute(request, ListSerializer(CollectionDto.serializer())).firstOrNull { it.isFavorite }
+    }
+
+    fun createFavoriteCollection(): CollectionDto {
+        val url = endpoint("/api/collections").newBuilder()
+            .addQueryParameter("is_public", "false")
+            .addQueryParameter("is_favorite", "true")
+            .build()
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("name", "Favorites")
+            .addFormDataPart("description", "")
+            .addFormDataPart("url_cover", "")
+            .build()
+        return execute(Request.Builder().url(url).post(multipart).build(), CollectionDto.serializer())
+    }
+
+    fun addRomsToCollection(collectionId: Int, romIds: Collection<Int>): CollectionDto =
+        mutateCollectionRoms(collectionId, romIds, add = true)
+
+    fun removeRomsFromCollection(collectionId: Int, romIds: Collection<Int>): CollectionDto =
+        mutateCollectionRoms(collectionId, romIds, add = false)
 
     fun currentUser(): String? = runCatching {
         val request = Request.Builder().url(endpoint("/api/users/me")).get().build()
@@ -358,6 +391,19 @@ class RommClient(
         clientProvider().newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw RommException(response.code, "HTTP ${response.code}: delete saves")
         }
+    }
+
+    private fun mutateCollectionRoms(
+        collectionId: Int,
+        romIds: Collection<Int>,
+        add: Boolean,
+    ): CollectionDto {
+        val payload = CollectionRomsPayload(romIds.distinct().sorted())
+        val body = rommJson.encodeToString(CollectionRomsPayload.serializer(), payload)
+            .toRequestBody(jsonMedia)
+        val builder = Request.Builder().url(endpoint("/api/collections/$collectionId/roms"))
+        val request = if (add) builder.post(body).build() else builder.delete(body).build()
+        return execute(request, CollectionDto.serializer())
     }
 
     private fun endpoint(path: String): HttpUrl {

@@ -101,6 +101,7 @@ class RommDevicePairingTest {
                         it.requestedScopes.containsAll(
                             listOf(
                                 "me.read", "platforms.read", "roms.read", "collections.read",
+                                "collections.write",
                                 "firmware.read", "assets.read", "assets.write",
                                 "devices.read", "devices.write",
                             )

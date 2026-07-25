@@ -103,6 +103,11 @@ class RomsRepository(
 
     fun allRelativePaths(): List<String> = db.queryAll("SELECT path FROM roms") { it.getText(0) }
 
+    fun allRoms(): List<Rom> = db.queryAll(
+        "$BASE_SELECT ORDER BY platform_tag, sort_key",
+        mapper = ::rowToRom,
+    )
+
     fun searchAllGames(query: GameSearchQuery): List<Rom> {
         val term = TextNormalizer.normalize(query.text)
         if (term.isEmpty()) return emptyList()
