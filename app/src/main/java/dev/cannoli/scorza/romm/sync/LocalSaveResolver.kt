@@ -14,22 +14,34 @@ data class LocalSave(
     val uploadFileName: String,
 )
 
+enum class LocalSaveMode {
+    NORMAL,
+    STANDALONE_ARCHIVE,
+}
+
 class LocalSaveResolver(private val cannoliRoot: File) {
 
     private fun savesDir(tag: String) = File(File(cannoliRoot, "Saves"), tag)
 
-    private fun matchingFiles(tag: String, base: String): List<File> {
+    private fun matchingFiles(tag: String, base: String, mode: LocalSaveMode): List<File> {
         val dir = savesDir(tag)
         if (!dir.isDirectory) return emptyList()
+        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
+            return listOf(File(dir, "$base.cannoli-standalone.zip")).filter { it.isFile }
+        }
         return dir.listFiles().orEmpty()
-            .filter { it.isFile && (it.nameWithoutExtension == base || it.name.startsWith("$base.")) }
+            .filter {
+                it.isFile &&
+                    !it.name.endsWith(".cannoli-standalone.zip") &&
+                    (it.nameWithoutExtension == base || it.name.startsWith("$base."))
+            }
             .sortedBy { it.name }
     }
 
-    fun resolve(tag: String, base: String): LocalSave? {
-        val files = matchingFiles(tag, base)
+    fun resolve(tag: String, base: String, mode: LocalSaveMode = LocalSaveMode.NORMAL): LocalSave? {
+        val files = matchingFiles(tag, base, mode)
         if (files.isEmpty()) return null
-        val isBundle = files.size > 1
+        val isBundle = mode == LocalSaveMode.NORMAL && files.size > 1
         val hash = if (isBundle) {
             SaveHasher.hashBundle(files.associateBy { it.name })
         } else {
@@ -41,12 +53,21 @@ class LocalSaveResolver(private val cannoliRoot: File) {
             sizeBytes = files.sumOf { it.length() },
             modifiedMillis = files.maxOf { it.lastModified() },
             contentHash = hash,
-            uploadFileName = if (isBundle) "$base.zip" else "$base.srm",
+            uploadFileName = if (isBundle || mode == LocalSaveMode.STANDALONE_ARCHIVE) "$base.zip" else "$base.srm",
         )
     }
 
-    fun bundleToZip(tag: String, base: String, dest: File): File {
-        val files = matchingFiles(tag, base)
+    fun bundleToZip(
+        tag: String,
+        base: String,
+        dest: File,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ): File {
+        val files = matchingFiles(tag, base, mode)
+        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
+            files.single().copyTo(dest, overwrite = true)
+            return dest
+        }
         ZipOutputStream(dest.outputStream()).use { zos ->
             for (f in files.sortedBy { it.name }) {
                 zos.putNextEntry(ZipEntry(f.name))
@@ -57,9 +78,28 @@ class LocalSaveResolver(private val cannoliRoot: File) {
         return dest
     }
 
-    fun applyDownload(tag: String, base: String, downloaded: File) {
+    fun applyDownload(
+        tag: String,
+        base: String,
+        downloaded: File,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ) {
         val dir = savesDir(tag).apply { mkdirs() }
-        val existing = matchingFiles(tag, base)
+        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
+            val destination = File(dir, "$base.cannoli-standalone.zip")
+            val part = File(dir, ".part_${java.util.UUID.randomUUID().toString().take(8)}_${destination.name}")
+            try {
+                downloaded.copyTo(part, overwrite = true)
+                if (!part.renameTo(destination)) {
+                    part.copyTo(destination, overwrite = true)
+                    part.delete()
+                }
+            } finally {
+                part.delete()
+            }
+            return
+        }
+        val existing = matchingFiles(tag, base, mode)
         // Stage every incoming file to a temp name first. A failure here never touches the live save,
         // and the per-call token keeps a concurrent apply of the same save from staging through our
         // path and publishing each other's half-written bytes.

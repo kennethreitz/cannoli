@@ -1,6 +1,8 @@
 package dev.cannoli.scorza.config
 
 import androidx.test.core.app.ApplicationProvider
+import dev.cannoli.scorza.model.Rom
+import dev.cannoli.scorza.romm.sync.RomKeys
 import dev.cannoli.scorza.ui.screens.EmulatorMappingStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +29,21 @@ class PlatformConfigStandaloneDisplayTest {
         val entry = pc.getDetailedMappings(installedRaCores = installedRaCores).first { it.tag == "NES" }
         assertEquals("Standalone", entry.runnerLabel)
         assertTrue(entry.coreDisplayName != pc.getCoreDisplayName("nestopia_libretro"))
+    }
+
+    @Test fun `RomM identity follows selected Citra MMJ app instead of bundled core`() {
+        val pc = config()
+        pc.setAppMapping("3DS", "org.citra.emu")
+        val rom = Rom(0, java.io.File("/tmp/game.3ds"), "3DS", "Game")
+
+        assertEquals("Citra MMJ", RomKeys.coreDisplayNameFor(rom, pc))
+    }
+
+    @Test fun `RomM identity uses default standalone app when platform has no core`() {
+        val pc = config()
+        val rom = Rom(0, java.io.File("/tmp/game.wua"), "WIIU", "Game")
+
+        assertEquals("Cemu", RomKeys.coreDisplayNameFor(rom, pc))
     }
 
     @Test fun `a mapped core confirmed missing is flagged NOT_INSTALLED`() {

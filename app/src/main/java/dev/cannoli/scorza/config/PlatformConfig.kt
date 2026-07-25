@@ -244,6 +244,17 @@ class PlatformConfig(
 
     fun getAppPackage(tag: String): String? = userApps[tag] ?: defaultApps[tag.uppercase()]?.firstOrNull()?.packageName
 
+    fun getSelectedStandaloneAppPackage(tag: String): String? {
+        userApps[tag]?.let { return it }
+        if (userRunners[tag] == "Standalone" || userRunners[tag] == "App") {
+            return getAppPackage(tag)
+        }
+        return getAppPackage(tag).takeIf { getCoreName(tag).isNullOrBlank() }
+    }
+
+    fun getAppDisplayName(packageName: String): String =
+        knownAppLabels[packageName] ?: packageName
+
     fun getAppOptions(tag: String): List<AppConfig> = defaultApps[tag.uppercase()] ?: emptyList()
 
     fun getAppConfig(tag: String, packageName: String): AppConfig {
