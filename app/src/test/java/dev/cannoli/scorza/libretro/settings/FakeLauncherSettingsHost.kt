@@ -32,6 +32,7 @@ open class FakeLauncherSettingsHost : LauncherSettingsHost {
     override var leftStickAsDpad = false
     override var allowDiagonals = true
     override var experimentalFeatures = false
+    override var rewindFeatureEnabled = false
     override var coreOptions = emptyList<LibretroRunner.CoreOption>()
     override var coreCategories = emptyList<LibretroRunner.CoreOptionCategory>()
     override var controllerTypes = emptyList<LibretroRunner.ControllerType>()

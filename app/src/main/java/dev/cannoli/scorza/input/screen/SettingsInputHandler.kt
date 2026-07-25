@@ -148,7 +148,7 @@ class SettingsInputHandler @Inject constructor(
             "audit_emulator_intents" -> runIntentAudit()
             "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(
                 shortcuts = globalOverrides.readShortcuts(),
-                experimentalFeatures = settings.experimentalFeatures,
+                rewindEnabled = settings.experimentalFeatures && settings.rewindEnabled,
             ))
             "input_tester" -> {
                 inputTesterController.enter()

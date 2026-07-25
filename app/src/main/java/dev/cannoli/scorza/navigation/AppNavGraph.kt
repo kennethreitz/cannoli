@@ -246,10 +246,10 @@ sealed class LauncherScreen {
         val listening: Boolean = false,
         val heldKeys: Set<Int> = emptySet(),
         val countdownMs: Int = 0,
-        val experimentalFeatures: Boolean = false,
+        val rewindEnabled: Boolean = false,
     ) : LauncherScreen(), ScrollableScreen {
         val actions: List<ShortcutAction>
-            get() = dev.cannoli.igm.availableShortcutActions(experimentalFeatures)
+            get() = dev.cannoli.igm.availableShortcutActions(rewindEnabled)
         override val itemCount: Int get() = actions.size
         override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
     }

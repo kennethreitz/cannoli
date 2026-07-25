@@ -68,6 +68,14 @@ class SettingsRepositoryTest {
         assertTrue(settings.dimLauncherDuringGames)
     }
 
+    @Test fun `rewind requires an explicit opt in`() {
+        val settings = newRepo()
+
+        assertFalse(settings.rewindEnabled)
+        settings.rewindEnabled = true
+        assertTrue(settings.rewindEnabled)
+    }
+
     @Test fun `save sync polling defaults to three minutes and stays within safe bounds`() {
         val settings = newRepo()
 

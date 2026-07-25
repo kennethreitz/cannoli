@@ -545,6 +545,9 @@ class SettingsViewModel @Inject constructor(
             "experimental_features" -> {
                 settings.experimentalFeatures = !settings.experimentalFeatures
             }
+            "rewind_enabled" -> {
+                settings.rewindEnabled = !settings.rewindEnabled
+            }
             "ra_package" -> {
                 val pkgs = detectInstalledRaPackages()
                 if (pkgs.isNotEmpty()) {
@@ -916,6 +919,11 @@ class SettingsViewModel @Inject constructor(
             add(SettingsItem("kitchen_code_bypass", R.string.setting_kitchen_code_bypass, valueRes = onOff(settings.kitchenCodeBypass)))
             add(SettingsItem("experimental_features", R.string.setting_experimental_features, valueRes = onOff(settings.experimentalFeatures)))
             if (settings.experimentalFeatures) {
+                add(SettingsItem(
+                    "rewind_enabled",
+                    R.string.setting_rewind,
+                    valueRes = onOff(settings.rewindEnabled),
+                ))
                 add(SettingsItem(
                     "dual_screen_launching",
                     R.string.setting_dual_screen_launching,
