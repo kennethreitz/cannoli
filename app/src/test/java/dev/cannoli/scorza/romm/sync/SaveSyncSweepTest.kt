@@ -472,6 +472,105 @@ class SaveSyncSweepTest {
         assertEquals("server-head", pending?.baseHead)
     }
 
+    @Test fun `sweep uses the negotiated server head without listing every missing rom`() = runBlocking {
+        // RomM's batch negotiation returns the head row for a missing local save. Trust it rather
+        // than making a per-ROM history request for every game without local save data.
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(
+            sessionId = 1,
+            operations = listOf(
+                SyncOperationDto(
+                    action = "download",
+                    romId = 42,
+                    saveId = 77,
+                    fileName = "Zelda.srm",
+                    slot = "autosave",
+                    serverUpdatedAt = "2026-07-19T01:54:32+00:00",
+                    serverContentHash = "head",
+                )
+            ),
+            totalDownload = 1,
+        )
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 70, romId = 42, slot = "autosave", contentHash = "stale", updatedAt = "2026-07-16T11:47:38+00:00"),
+            RommSaveDto(id = 77, romId = 42, slot = "autosave", contentHash = "head", updatedAt = "2026-07-19T01:54:32+00:00"),
+        )
+        every { client.downloadSaveContent(any(), any(), any()) } answers { thirdArg<File>().writeBytes("HEAD".toByteArray()) }
+
+        val summary = service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        assertEquals(1, summary.downloaded)
+        verify { client.downloadSaveContent(77, "dev-1", any()) }
+        verify(exactly = 0) { client.downloadSaveContent(70, "dev-1", any()) }
+        verify(exactly = 0) { client.getSaves(any(), any()) }
+        assertEquals(77, store.get("SNES/Zelda.sfc", DEFAULT_SLOT)?.rommSaveId)
+    }
+
+    @Test fun `regenerate pulls the newest server save when the rom has several`() = runBlocking {
+        seedAnchor(lastUploadedHash = "gone", localContentHash = "gone") // anchor without a local file
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 70, romId = 42, slot = "autosave", contentHash = "stale", updatedAt = "2026-07-16T11:47:38+00:00"),
+            RommSaveDto(id = 77, romId = 42, slot = "autosave", contentHash = "head", updatedAt = "2026-07-19T01:54:32+00:00"),
+        )
+        every { client.downloadSaveContent(any(), any(), any()) } answers { thirdArg<File>().writeBytes("HEAD".toByteArray()) }
+
+        service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        verify { client.downloadSaveContent(77, "dev-1", any()) }
+    }
+
+    // A save that hashes empty is impossible, so an anchor holding that hash was written from a bad
+    // read: never push the file sitting next to it over the server head.
+    @Test fun `sweep escalates when the anchor records an impossible empty save`() = runBlocking {
+        writeSave("ON-DISK")
+        seedAnchor(lastUploadedHash = "server-head", localContentHash = SaveHasher.EMPTY_MD5)
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1, operations = emptyList())
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 88, romId = 42, slot = "autosave", contentHash = "server-head", updatedAt = "2026-07-19T01:54:32+00:00")
+        )
+
+        val summary = service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        assertEquals(0, summary.uploaded)
+        assertEquals(1, pendingStore.count())
+        verify(exactly = 0) { client.uploadSave(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun `sweep still uploads ordinary drift from a played session`() = runBlocking {
+        writeSave("PLAYED")
+        val localHash = SaveHasher.hashFile(File(sd, "Saves/SNES/Zelda.srm"))
+        seedAnchor(lastUploadedHash = "server-head", localContentHash = "hash-before-the-session")
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1, operations = emptyList())
+        every { client.uploadSave(any(), any(), any(), any(), any(), any()) } returns RommSaveDto(id = 55, slot = "autosave", contentHash = localHash, updatedAt = "t2")
+
+        val summary = service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        assertEquals(1, summary.uploaded)
+        assertEquals(0, pendingStore.count())
+    }
+
+    @Test fun `resolving a pending conflict verifies the server hash before applying`() = runBlocking {
+        writeSave("KEEP-ME")
+        pendingStore.upsert(
+            PendingConflict(
+                gameKey = "SNES/Zelda.sfc",
+                romId = 42,
+                displayName = "Zelda",
+                serverSaveId = 100,
+                serverContentHash = "0".repeat(32),
+                serverUpdatedAt = "2026-07-19T01:54:32+00:00",
+                detectedAt = System.currentTimeMillis(),
+                dismissedHash = null,
+            )
+        )
+        every { client.downloadSaveContent(any(), any(), any()) } answers { thirdArg<File>().writeBytes("CORRUPT".toByteArray()) }
+
+        val ok = service.resolvePending("SNES/Zelda.sfc", keepLocal = false) { Triple("SNES", "Zelda", "snes9x") }
+
+        assertEquals(false, ok)
+        assertEquals("KEEP-ME", File(sd, "Saves/SNES/Zelda.srm").readText())
+        assertEquals(1, pendingStore.count())
+    }
+
     @Test fun `syncEnabled is false when not connected even if the setting is on`() {
         every { connStore.isConfigured } returns false
         assertEquals(false, service.syncEnabled())

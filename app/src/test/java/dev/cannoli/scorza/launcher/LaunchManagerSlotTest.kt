@@ -42,6 +42,7 @@ class LaunchManagerSlotTest {
             retroArchLauncher = mockk(relaxed = true),
             emuLauncher = mockk(relaxed = true),
             apkLauncher = apkLauncher,
+            delfinoLauncher = mockk(relaxed = true),
             launchState = launchState,
             activeMappingHolder = mockk(relaxed = true),
             activityDisplayRouter = mockk(relaxed = true),

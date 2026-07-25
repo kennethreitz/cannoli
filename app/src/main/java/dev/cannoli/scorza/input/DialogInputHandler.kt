@@ -92,6 +92,7 @@ class DialogInputHandler @Inject constructor(
     private val osdController: dev.cannoli.ui.components.OsdController,
     private val rommDevicePairing: dev.cannoli.scorza.romm.RommDevicePairing,
 ) : DialogPrecedence {
+    private val applyingConflicts = java.util.concurrent.atomic.AtomicBoolean(false)
     private val selectHoldHandler = Handler(Looper.getMainLooper())
     private val selectHoldRunnable = Runnable {
         nav.selectHeld = true
@@ -108,14 +109,22 @@ class DialogInputHandler @Inject constructor(
     }
 
     override fun onMenu(): Boolean {
-        if (nav.dialogState.value != DialogState.None) return false
-        if (isRommScreen()) {
-            nav.dialogState.value = DialogState.RommActionsMenu(
-                hasDownloads = rommDownloader.queue.state.value.isNotEmpty(),
-            )
+        val ds = nav.dialogState.value
+        if (ds is KeyboardHost) {
+            nav.dialogState.value = DialogState.KeyboardHelp(ds, ds.keyboard.layout)
             return true
         }
-        if (!isLauncherHomeScreen()) return false
+        if (ds is DialogState.KeyboardHelp) {
+            nav.dialogState.value = ds.restore
+            return true
+        }
+        if (ds != DialogState.None) return false
+        if (isRommScreen()) {
+            if (rommDownloader.queue.state.value.isEmpty()) return true
+            nav.dialogState.value = DialogState.RommActionsMenu(hasDownloads = true)
+            return true
+        }
+        if (isQuickMenuBlockedScreen()) return false
         ioScope.launch {
             val count = saveSyncService.pendingConflictCount()
             val errorCount = saveSyncStatusHolder.errors.value.size
@@ -138,9 +147,11 @@ class DialogInputHandler @Inject constructor(
         return true
     }
 
-    private fun isLauncherHomeScreen(): Boolean = when (nav.currentScreen) {
-        is LauncherScreen.SystemList,
-        is LauncherScreen.GameList -> true
+    private fun isQuickMenuBlockedScreen(): Boolean = when (nav.currentScreen) {
+        is LauncherScreen.InputTester,
+        is LauncherScreen.EditButtons,
+        is LauncherScreen.ShortcutBinding,
+        is LauncherScreen.OnboardingPermissions -> true
         else -> false
     }
 
@@ -151,6 +162,8 @@ class DialogInputHandler @Inject constructor(
         is LauncherScreen.RommFirmwareList,
         is LauncherScreen.RommCollectionList,
         is LauncherScreen.RommCollectionGameList,
+        is LauncherScreen.RommCollectionGroups,
+        is LauncherScreen.RommVirtualTypes,
         is LauncherScreen.RommGameDetail -> true
         else -> false
     }
@@ -701,12 +714,6 @@ class DialogInputHandler @Inject constructor(
             dev.cannoli.scorza.ui.components.RommActionRow.DOWNLOADS -> {
                 nav.dialogState.value = DialogState.RommDownloads()
             }
-            dev.cannoli.scorza.ui.components.RommActionRow.RETURN_TO_CANNOLI -> {
-                nav.dialogState.value = DialogState.None
-                rommDownloader.clearFinished()
-                while (isRommScreen()) nav.pop()
-                launcherActions.refreshLauncherLists()
-            }
             else -> {}
         }
     }
@@ -977,24 +984,51 @@ class DialogInputHandler @Inject constructor(
         nav.dialogState.value = ds.copy(rows = newRows)
     }
 
+    // Each pass downloads or uploads a save per row and takes seconds. The applying state replaces
+    // the list so the press has visible feedback and the rows can't be re-applied mid-flight; the
+    // guard is the second line of defense on the async boundary.
     private fun applyAllConflicts(ds: DialogState.ConflictsMenu) {
+        if (!applyingConflicts.compareAndSet(false, true)) return
         val fromSaveSyncMenu = ds.fromSaveSyncMenu
         val rows = ds.rows
         val resolveGame = dev.cannoli.scorza.romm.sync.rommResolveGame(platformResolver, romDir())
+        nav.dialogState.value = DialogState.ConflictsApplying
         ioScope.launch {
-            for (row in rows) {
-                when (row.choice) {
-                    dev.cannoli.scorza.ui.screens.ConflictChoice.KEEP_LOCAL ->
-                        saveSyncService.resolvePending(row.gameKey, keepLocal = true, resolveGame)
-                    dev.cannoli.scorza.ui.screens.ConflictChoice.USE_SERVER ->
-                        saveSyncService.resolvePending(row.gameKey, keepLocal = false, resolveGame)
-                    dev.cannoli.scorza.ui.screens.ConflictChoice.SKIP ->
-                        saveSyncService.skipPending(row.gameKey)
+            try {
+                var failed = 0
+                for (row in rows) {
+                    val applied = when (row.choice) {
+                        dev.cannoli.scorza.ui.screens.ConflictChoice.KEEP_LOCAL ->
+                            saveSyncService.resolvePending(row.gameKey, keepLocal = true, resolveGame)
+                        dev.cannoli.scorza.ui.screens.ConflictChoice.USE_SERVER ->
+                            saveSyncService.resolvePending(row.gameKey, keepLocal = false, resolveGame)
+                        dev.cannoli.scorza.ui.screens.ConflictChoice.SKIP -> {
+                            saveSyncService.skipPending(row.gameKey)
+                            true
+                        }
+                    }
+                    if (!applied) failed++
                 }
+                val count = saveSyncService.pendingConflictCount()
+                saveSyncStatusHolder.settle(enabled = saveSyncService.syncEnabled(), online = true, pendingConflicts = count, hadError = failed > 0)
+                withContext(Dispatchers.Main) {
+                    if (failed > 0) {
+                        osdController.show(
+                            context.resources.getQuantityString(
+                                dev.cannoli.ui.R.plurals.conflicts_apply_failed, failed, failed
+                            )
+                        )
+                    }
+                    showOriginMenu(fromSaveSyncMenu, count)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Never strand the user on the applying overlay: it is full screen and eats input.
+                withContext(Dispatchers.Main) { nav.dialogState.value = DialogState.None }
+            } finally {
+                applyingConflicts.set(false)
             }
-            val count = saveSyncService.pendingConflictCount()
-            saveSyncStatusHolder.settle(enabled = saveSyncService.syncEnabled(), online = true, pendingConflicts = count, hadError = false)
-            withContext(Dispatchers.Main) { showOriginMenu(fromSaveSyncMenu, count) }
         }
     }
 
@@ -1073,6 +1107,7 @@ class DialogInputHandler @Inject constructor(
         val ds = nav.dialogState.value
         if (ds == DialogState.None) return false
         when (ds) {
+            is DialogState.KeyboardHelp -> nav.dialogState.value = ds.restore
             is KeyboardHost -> nav.dialogState.value = ds.withKeyboard(KeyboardController.backspace(ds.keyboard))
             is DialogState.ColorPicker -> {
                 val entries = settingsViewModel.getColorEntries()
@@ -1238,7 +1273,7 @@ class DialogInputHandler @Inject constructor(
                 nav.dialogState.value = DialogState.None
                 launcherActions.cancelPendingLaunch()
             }
-            is DialogState.SaveSyncChecking -> {}
+            is DialogState.SaveSyncChecking, is DialogState.ConflictsApplying -> {}
             else -> {}
         }
         return true
@@ -1439,8 +1474,14 @@ class DialogInputHandler @Inject constructor(
             } else {
                 when (state.options[state.selectedOption]) {
                     MENU_RENAME -> {
+                        val renameTitle = when (systemListViewModel.getSelectedItem()) {
+                            is SystemListViewModel.ListItem.PlatformItem -> dev.cannoli.ui.R.string.keyboard_title_rename_platform
+                            is SystemListViewModel.ListItem.CollectionItem -> dev.cannoli.ui.R.string.keyboard_title_rename_collection
+                            else -> dev.cannoli.ui.R.string.keyboard_title_rename_folder
+                        }
                         nav.dialogState.value = DialogState.RenameInput(
                             gameName = state.gameName,
+                            titleRes = renameTitle,
                             keyboard = KeyboardState(text = state.gameName, cursorPos = state.gameName.length),
                         )
                     }
@@ -1493,8 +1534,14 @@ class DialogInputHandler @Inject constructor(
                         keyboard = KeyboardState(text = displayName),
                     )
                 } else {
+                    val renameTitle = when (item) {
+                        is ListItem.AppItem -> dev.cannoli.ui.R.string.keyboard_title_rename_app
+                        is ListItem.SubfolderItem -> dev.cannoli.ui.R.string.keyboard_title_rename_folder
+                        else -> dev.cannoli.ui.R.string.keyboard_title_rename_game
+                    }
                     nav.dialogState.value = DialogState.RenameInput(
                         gameName = displayName,
+                        titleRes = renameTitle,
                         keyboard = KeyboardState(text = displayName, cursorPos = displayName.length),
                     )
                 }

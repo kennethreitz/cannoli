@@ -1,6 +1,7 @@
 package dev.cannoli.scorza.ui.screens
 
 import dev.cannoli.ui.ELLIPSIS
+import dev.cannoli.ui.components.KeyboardLayout
 import dev.cannoli.ui.components.KeyboardState
 
 enum class EmulatorMappingStatus { READY, NOT_INSTALLED, NEEDS_SETUP }
@@ -41,6 +42,7 @@ sealed interface DialogState {
     data class RenameInput(
         val gameName: String,
         val searchScope: String? = null,
+        @androidx.annotation.StringRes override val titleRes: Int? = null,
         override val keyboard: KeyboardState = KeyboardState(),
     ) : DialogState, KeyboardHost {
         override fun withKeyboard(keyboard: KeyboardState) = copy(keyboard = keyboard)
@@ -50,6 +52,7 @@ sealed interface DialogState {
         val parentId: Long? = null,
         override val keyboard: KeyboardState = KeyboardState(),
     ) : DialogState, KeyboardHost {
+        override val titleRes: Int get() = dev.cannoli.ui.R.string.keyboard_title_new_collection
         override fun withKeyboard(keyboard: KeyboardState) = copy(keyboard = keyboard)
     }
     data class CollectionRenameInput(
@@ -57,6 +60,7 @@ sealed interface DialogState {
         val oldDisplayName: String,
         override val keyboard: KeyboardState = KeyboardState(),
     ) : DialogState, KeyboardHost {
+        override val titleRes: Int get() = dev.cannoli.ui.R.string.keyboard_title_rename_collection
         override fun withKeyboard(keyboard: KeyboardState) = copy(keyboard = keyboard)
     }
     data class DeleteCollectionConfirm(val collectionId: Long, val displayName: String) : DialogState
@@ -81,8 +85,10 @@ sealed interface DialogState {
         val parentPath: String,
         override val keyboard: KeyboardState = KeyboardState(),
     ) : DialogState, KeyboardHost {
+        override val titleRes: Int get() = dev.cannoli.ui.R.string.keyboard_title_new_folder
         override fun withKeyboard(keyboard: KeyboardState) = copy(keyboard = keyboard)
     }
+    data class KeyboardHelp(val restore: DialogState, val layout: KeyboardLayout) : DialogState
     data object QuitConfirm : DialogState
     data class UpdateDownload(val versionName: String, val changelog: String) : DialogState
     data object RestartRequired : DialogState
@@ -137,6 +143,7 @@ sealed interface DialogState {
     data class SaveBackupRestoreConfirm(val tag: String, val base: String, val displayName: String, val stamp: Long, val dateLabel: String, val fromContextMenu: Boolean = false) : DialogState
     data class ConflictsMenu(val rows: List<ConflictRow>, val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : DialogState
     data object SaveSyncChecking : DialogState
+    data object ConflictsApplying : DialogState
     data class SaveSyncConflict(
         val conflict: dev.cannoli.scorza.romm.sync.PreLaunchOutcome.Conflict,
         val selectedIndex: Int = 0,
@@ -176,6 +183,7 @@ interface KeyboardHost {
     fun withKeyboard(keyboard: KeyboardState): DialogState
     val currentName: String get() = keyboard.text
     val cursorPos: Int get() = keyboard.cursorPos
+    @get:androidx.annotation.StringRes val titleRes: Int? get() = null
 }
 
 fun DialogState.withMenuDelta(delta: Int): DialogState? = when (this) {
@@ -202,6 +210,7 @@ val DialogState.isFullScreen: Boolean
         is DialogState.NewCollectionInput,
         is DialogState.CollectionRenameInput,
         is DialogState.NewFolderInput,
+        is DialogState.KeyboardHelp,
         is DialogState.About,
         is DialogState.Kitchen,
         is DialogState.RAAccount,
@@ -235,6 +244,7 @@ val DialogState.isFullScreen: Boolean
         is DialogState.SaveBackupList,
         is DialogState.SaveBackupRestoreConfirm,
         is DialogState.ConflictsMenu,
+        is DialogState.ConflictsApplying,
         is DialogState.RommVersionPicker -> true
         else -> false
     }

@@ -12,6 +12,7 @@
     <string name="label_firmware">FIRMWARE</string>
     <string name="label_choose">CHOOSE</string>
     <string name="label_close">CLOSE</string>
+    <string name="label_help">HELP</string>
     <string name="label_remove">REMOVE SHORTCUT</string>
     <string name="label_delete">DELETE</string>
     <string name="label_confirm">CONFIRM</string>
@@ -275,12 +276,12 @@
     <string name="romm_settings_rebuild">Rebuild Cache</string>
     <string name="romm_actions_title">RomM Quick Menu</string>
     <string name="romm_settings_title">RomM Settings</string>
-    <string name="romm_return_to_cannoli">Return to Cannoli</string>
     <string name="romm_platforms_title">Show Platforms</string>
     <string name="romm_platforms_empty">No platforms</string>
     <string name="romm_firmware_screen_title">%1$s Firmware</string>
     <string name="romm_global_search_title">Search</string>
     <string name="romm_no_results">No results</string>
+    <string name="romm_firmware_loading">Loading</string>
     <string name="romm_firmware_empty">No firmware</string>
     <string name="romm_firmware_error">Could not load firmware</string>
     <string name="romm_firmware_not_on_device">Not on Device</string>
@@ -462,6 +463,18 @@
     <string name="search_global">Global Search</string>
     <string name="search_romm">RomM Search</string>
     <string name="search_in_platform">%1$s Search</string>
+
+    <!-- Keyboard entry headers -->
+    <string name="keyboard_title_new_collection">New Collection</string>
+    <string name="keyboard_title_rename_collection">Rename Collection</string>
+    <string name="keyboard_title_new_folder">New Folder</string>
+    <string name="keyboard_title_rename_game">Rename Game</string>
+    <string name="keyboard_title_rename_app">Rename App</string>
+    <string name="keyboard_title_rename_folder">Rename Folder</string>
+    <string name="keyboard_title_rename_platform">Rename Platform</string>
+    <string name="keyboard_title_new_slot">New Slot</string>
+    <string name="keyboard_title_rename_slot">Rename Slot</string>
+    <string name="keyboard_title_rename_controller">Rename Controller</string>
 
     <!-- Quick menu -->
     <string name="quick_menu_title">Quick Menu</string>
@@ -668,6 +681,11 @@
 
     <!-- Conflicts resolution screen -->
     <string name="conflicts_title">Sync Conflicts</string>
+    <string name="conflicts_applying">Applying conflicts...</string>
+    <plurals name="conflicts_apply_failed">
+        <item quantity="one">%1$d save could not be applied</item>
+        <item quantity="other">%1$d saves could not be applied</item>
+    </plurals>
     <plurals name="quick_menu_conflicts">
         <item quantity="one">Sync Conflicts (1)</item>
         <item quantity="other">Sync Conflicts (%1$d)</item>
@@ -698,4 +716,20 @@
     <string name="conflict_yours">Yours</string>
     <string name="conflict_server">Server</string>
     <string name="conflict_older">older</string>
+
+    <!-- On-screen keyboard help overlay -->
+    <string name="kbd_help_title">Keyboard Controls</string>
+    <string name="kbd_help_group_type">Type</string>
+    <string name="kbd_help_group_cursor">Cursor</string>
+    <string name="kbd_help_group_action">Action</string>
+    <string name="kbd_help_move_selection">MOVE SELECTION</string>
+    <string name="kbd_help_press">TYPE KEY</string>
+    <string name="kbd_help_backspace">BACKSPACE</string>
+    <string name="kbd_help_space">SPACE</string>
+    <string name="kbd_help_shift">SHIFT / CAPS (TAP)</string>
+    <string name="kbd_help_symbols">SYMBOLS (HOLD)</string>
+    <string name="kbd_help_cursor_move">MOVE LEFT / RIGHT</string>
+    <string name="kbd_help_cursor_jump">JUMP TO START / END</string>
+    <string name="kbd_help_submit">SUBMIT</string>
+    <string name="kbd_help_cancel">CANCEL</string>
 </resources>

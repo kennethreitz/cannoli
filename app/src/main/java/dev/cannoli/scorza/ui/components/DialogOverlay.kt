@@ -45,6 +45,7 @@ import dev.cannoli.ui.components.BottomBar
 import dev.cannoli.ui.components.QuickInfoOverlay
 import dev.cannoli.ui.components.ColorPickerOverlay
 import dev.cannoli.ui.components.HexColorInputOverlay
+import dev.cannoli.ui.components.KeyboardHelpOverlay
 import dev.cannoli.ui.components.KeyboardOverlay
 import dev.cannoli.ui.components.List
 import dev.cannoli.ui.components.ListSection
@@ -52,6 +53,7 @@ import dev.cannoli.ui.components.PillRowInfo
 import dev.cannoli.ui.components.PillRowKeyValue
 import dev.cannoli.ui.components.PillRowText
 import dev.cannoli.ui.components.MessageOverlay
+import dev.cannoli.ui.components.OverlayScrim
 import dev.cannoli.ui.components.SectionedList
 import dev.cannoli.ui.components.RAAccountOverlay
 import dev.cannoli.ui.components.RALoggingInOverlay
@@ -178,18 +180,28 @@ fun DialogOverlay(
 
         is KeyboardHost -> {
             val host = dialogState
-            val keyboardTitle = (dialogState as? DialogState.RenameInput)?.let { rn ->
-                when (rn.gameName) {
-                    "launcher_global_search" -> stringResource(R.string.search_global)
-                    "romm_global_search" -> stringResource(R.string.search_romm)
-                    "launcher_search", "romm_search", "romm_collection_search" -> rn.searchScope?.let { stringResource(R.string.search_in_platform, it) }
-                    "romm_device_name" -> stringResource(dev.cannoli.ui.R.string.dialog_romm_device_name_title)
-                    else -> null
+            val keyboardTitle = host.titleRes?.let { stringResource(it) }
+                ?: (dialogState as? DialogState.RenameInput)?.let { rn ->
+                    when (rn.gameName) {
+                        "launcher_global_search" -> stringResource(R.string.search_global)
+                        "romm_global_search" -> stringResource(R.string.search_romm)
+                        "launcher_search", "romm_search", "romm_collection_search" -> rn.searchScope?.let { stringResource(R.string.search_in_platform, it) }
+                        "romm_device_name" -> stringResource(dev.cannoli.ui.R.string.dialog_romm_device_name_title)
+                        else -> null
+                    }
                 }
-            }
             KeyboardOverlay(
                 state = host.keyboard,
                 title = keyboardTitle,
+                buttonStyle = buttonStyle
+            )
+        }
+
+        is DialogState.KeyboardHelp -> {
+            KeyboardHelpOverlay(
+                layout = dialogState.layout,
+                titleFontSize = listFontSize,
+                titleLineHeight = listLineHeight,
                 buttonStyle = buttonStyle
             )
         }
@@ -895,6 +907,17 @@ fun DialogOverlay(
             }
         }
 
+        is DialogState.ConflictsApplying -> {
+            OverlayScrim {
+                androidx.compose.material3.Text(
+                    text = stringResource(R.string.conflicts_applying),
+                    color = LocalCannoliColors.current.text,
+                    fontSize = listFontSize,
+                    lineHeight = listLineHeight,
+                )
+            }
+        }
+
         else -> {}
     }
 }
@@ -1112,7 +1135,6 @@ val ROMM_ADVANCED_ROWS = listOf(R.string.romm_settings_rebuild, R.string.romm_se
 
 enum class RommActionRow(@androidx.annotation.StringRes val labelRes: Int) {
     DOWNLOADS(R.string.romm_download_queue),
-    RETURN_TO_CANNOLI(R.string.romm_return_to_cannoli),
     ;
     companion object {
         fun visibleRows(hasDownloads: Boolean): List<RommActionRow> =

@@ -90,11 +90,7 @@ fun CannoliIGM(
     cheatSections: List<dev.cannoli.ui.components.ListSection<CheatRowUi>> = emptyList(),
     cheatHasRemembered: Boolean = false,
 ) {
-    val showDescription = when (screen) {
-        is IGMScreen.Emulator -> screen.showDescription
-        is IGMScreen.EmulatorCategory -> screen.showDescription
-        else -> false
-    }
+    val showDescription = false
     val isGuideScreen = screen is IGMScreen.Guide
     val igmFontSize = config.fontSizeSp.sp
     val igmLineHeight = config.lineHeightSp.sp
@@ -185,61 +181,41 @@ fun CannoliIGM(
                         }
                     }
                 }
-                is IGMScreen.Settings, is IGMScreen.Video, is IGMScreen.Advanced,
-                is IGMScreen.ShaderSettings, is IGMScreen.Input,
-                is IGMScreen.Emulator, is IGMScreen.EmulatorCategory,
-                is IGMScreen.Shortcuts, is IGMScreen.SavePrompt,
-                is IGMScreen.RaOptions, is IGMScreen.RaOptionsCategory,
+                is IGMScreen.ShaderSettings,
+                is IGMScreen.Shortcuts,
+                is IGMScreen.ProviderSettings, is IGMScreen.SettingsExitPrompt,
                 is IGMScreen.Buttons -> {
                     val description = if (showDescription) {
                         settingsItems.getOrNull(screen.selectedIndex)?.hint
                     } else null
-                    val isOptionList = screen is IGMScreen.EmulatorCategory ||
-                        (screen is IGMScreen.Emulator && settingsItems.all { it.value != null })
                     val changeLabel = stringResource(dev.cannoli.ui.R.string.label_change)
                     val selectLabel = stringResource(dev.cannoli.ui.R.string.label_select)
-                    val showsCycleHint = isOptionList ||
-                        (screen is IGMScreen.Shortcuts && screen.selectedIndex == 0) ||
-                        (screen is IGMScreen.Input &&
-                            settingsItems.getOrNull(screen.selectedIndex)?.value != null) ||
-                        screen is IGMScreen.Video ||
-                        screen is IGMScreen.Advanced ||
+                    val providerRowCycles = screen is IGMScreen.ProviderSettings &&
+                        settingsItems.getOrNull(screen.selectedIndex)?.value != null
+                    val showsCycleHint = (screen is IGMScreen.Shortcuts && screen.selectedIndex == 0) ||
                         screen is IGMScreen.ShaderSettings ||
-                        screen is IGMScreen.RaOptionsCategory
+                        providerRowCycles
                     val bottomBarRight = when {
-                        isOptionList -> listOf(labels.confirm to stringResource(dev.cannoli.ui.R.string.label_info))
                         screen is IGMScreen.Shortcuts && screen.selectedIndex == 0 -> emptyList()
                         screen is IGMScreen.Shortcuts -> listOf(labels.north to stringResource(dev.cannoli.ui.R.string.label_clear), labels.confirm to stringResource(dev.cannoli.ui.R.string.label_set))
-                        screen is IGMScreen.Video -> listOf(labels.confirm to selectLabel)
-                        screen is IGMScreen.Advanced -> emptyList()
                         screen is IGMScreen.ShaderSettings -> emptyList()
-                        screen is IGMScreen.Input &&
-                            settingsItems.getOrNull(screen.selectedIndex)?.value != null -> emptyList()
-                        screen is IGMScreen.Input -> listOf(labels.confirm to selectLabel)
                         screen is IGMScreen.Buttons -> listOf(
                             labels.north to stringResource(dev.cannoli.ui.R.string.label_clear),
                             labels.confirm to stringResource(dev.cannoli.ui.R.string.label_press),
                         )
-                        screen is IGMScreen.RaOptions -> listOf(labels.north to stringResource(dev.cannoli.ui.R.string.label_ra_settings), labels.confirm to selectLabel)
-                        screen is IGMScreen.RaOptionsCategory -> emptyList()
+                        screen is IGMScreen.ProviderSettings &&
+                            settingsItems.getOrNull(screen.selectedIndex)?.value != null -> emptyList()
+                        screen is IGMScreen.ProviderSettings ->
+                            listOf(labels.confirm to selectLabel)
                         else -> listOf(labels.confirm to selectLabel)
                     }
-                    val emulatorLabel = stringResource(dev.cannoli.ui.R.string.igm_emulator)
                     val title = when (screen) {
-                        is IGMScreen.Settings -> stringResource(dev.cannoli.ui.R.string.igm_settings)
-                        is IGMScreen.Video -> stringResource(dev.cannoli.ui.R.string.igm_video)
-                        is IGMScreen.Input -> stringResource(dev.cannoli.ui.R.string.igm_input)
-                        is IGMScreen.Advanced -> stringResource(dev.cannoli.ui.R.string.igm_advanced)
                         is IGMScreen.ShaderSettings -> stringResource(dev.cannoli.ui.R.string.igm_shader_settings)
-                        is IGMScreen.Emulator -> emulatorLabel
-                        is IGMScreen.EmulatorCategory -> screen.categoryTitle.ifEmpty { emulatorLabel }
                         is IGMScreen.Shortcuts -> stringResource(dev.cannoli.ui.R.string.title_shortcuts)
-                        is IGMScreen.SavePrompt -> stringResource(dev.cannoli.ui.R.string.igm_save_changes)
                         is IGMScreen.Buttons -> stringResource(dev.cannoli.ui.R.string.igm_button_mappings)
-                        is IGMScreen.RaOptions -> stringResource(dev.cannoli.ui.R.string.igm_settings)
-                        is IGMScreen.RaOptionsCategory -> screen.categoryTitle.ifEmpty {
-                            stringResource(dev.cannoli.ui.R.string.igm_settings)
-                        }
+                        is IGMScreen.ProviderSettings -> screen.title
+                        is IGMScreen.SettingsExitPrompt ->
+                            stringResource(dev.cannoli.ui.R.string.igm_save_changes)
                         else -> stringResource(dev.cannoli.ui.R.string.igm_settings)
                     }
                     val bottomBarLeft = buildList {
@@ -255,7 +231,7 @@ fun CannoliIGM(
                         selectedIndex = screen.selectedIndex,
                         bottomBarLeft = bottomBarLeft,
                         bottomBarRight = bottomBarRight,
-                        coreInfo = if (screen is IGMScreen.RaOptionsCategory)
+                        coreInfo = if (screen is IGMScreen.ProviderSettings && screen.path.isNotEmpty())
                             settingsItems.getOrNull(screen.selectedIndex)?.hint.orEmpty()
                         else coreInfo,
                         description = description,
