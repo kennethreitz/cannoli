@@ -471,7 +471,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         const val DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 3
         const val MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 1
         const val MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 24 * 60
-        val ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES = listOf(3, 5, 15, 30, 60)
+        val ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES = listOf(1, 3, 10, 30, 60, 240)
         private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val KEY_SD_ROOT = "sd_root"
         private const val KEY_ROM_DIRECTORY = "rom_directory"

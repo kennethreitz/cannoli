@@ -203,6 +203,8 @@
     <string name="setting_romm_save_sync">Save Sync</string>
     <string name="setting_romm_save_sync_interval">Check Every</string>
     <string name="romm_save_sync_interval_minutes">%1$d min</string>
+    <string name="romm_save_sync_interval_one_hour">1 hr</string>
+    <string name="romm_save_sync_interval_four_hours">4 hrs</string>
     <string name="setting_romm_save_backups">Save Backups</string>
     <string name="romm_citra_saves_experimental">Citra MMJ Saves (Experimental)</string>
     <string name="romm_cemu_saves_experimental">Cemu Saves (Experimental)</string>

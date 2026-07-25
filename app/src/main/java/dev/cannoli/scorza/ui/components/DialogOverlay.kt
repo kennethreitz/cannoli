@@ -477,10 +477,14 @@ fun DialogOverlay(
                         )
                         RommSaveSyncRow.INTERVAL -> PillRowKeyValue(
                             label = stringResource(R.string.setting_romm_save_sync_interval),
-                            value = stringResource(
-                                R.string.romm_save_sync_interval_minutes,
-                                dialogState.syncIntervalMinutes,
-                            ),
+                            value = when (dialogState.syncIntervalMinutes) {
+                                60 -> stringResource(R.string.romm_save_sync_interval_one_hour)
+                                240 -> stringResource(R.string.romm_save_sync_interval_four_hours)
+                                else -> stringResource(
+                                    R.string.romm_save_sync_interval_minutes,
+                                    dialogState.syncIntervalMinutes,
+                                )
+                            },
                             isSelected = isSelected,
                             fontSize = listFontSize,
                             lineHeight = listLineHeight,

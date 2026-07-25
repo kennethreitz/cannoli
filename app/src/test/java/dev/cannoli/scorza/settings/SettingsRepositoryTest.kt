@@ -72,9 +72,13 @@ class SettingsRepositoryTest {
         val settings = newRepo()
 
         assertEquals(3, settings.rommSaveSyncIntervalMinutes)
+        assertEquals(
+            listOf(1, 3, 10, 30, 60, 240),
+            SettingsRepository.ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES,
+        )
 
-        settings.rommSaveSyncIntervalMinutes = 15
-        assertEquals(15, settings.rommSaveSyncIntervalMinutes)
+        settings.rommSaveSyncIntervalMinutes = 240
+        assertEquals(240, settings.rommSaveSyncIntervalMinutes)
 
         settings.rommSaveSyncIntervalMinutes = 0
         assertEquals(SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
