@@ -204,6 +204,12 @@
     <string name="setting_romm_save_sync_interval">Check Every</string>
     <string name="romm_save_sync_interval_minutes">%1$d min</string>
     <string name="setting_romm_save_backups">Save Backups</string>
+    <string name="romm_citra_saves_experimental">Citra MMJ Saves (Experimental)</string>
+    <string name="romm_cemu_saves_experimental">Cemu Saves (Experimental)</string>
+    <string name="romm_save_folder_connect">Connect</string>
+    <string name="romm_save_folder_connected">Connected</string>
+    <string name="romm_standalone_saves_connected">%1$s saves connected</string>
+    <string name="romm_standalone_saves_wrong_folder">Choose the top-level %1$s folder</string>
     <string name="dialog_romm_device_name_title">Name this device</string>
     <string name="romm_save_sync_needs_500">Requires RomM 5.0+</string>
     <string name="save_conflict_title">Save conflict</string>

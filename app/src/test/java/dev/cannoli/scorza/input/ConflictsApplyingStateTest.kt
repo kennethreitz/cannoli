@@ -64,6 +64,7 @@ class ConflictsApplyingStateTest {
             syncHistoryStore = mockk(relaxed = true),
             pendingConflictStore = mockk(relaxed = true),
             saveSyncStatusHolder = SaveSyncStatusHolder(),
+            standaloneSaveBridge = mockk(relaxed = true),
             osdController = mockk(relaxed = true),
             rommDevicePairing = mockk(relaxed = true),
         )

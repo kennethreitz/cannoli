@@ -214,6 +214,38 @@ internal object Migrations {
                 """.trimIndent()
             )
         },
+        Migration(12) { db ->
+            db.execSQL(
+                """
+                CREATE TABLE pending_conflicts_new (
+                    game_key TEXT NOT NULL,
+                    slot TEXT NOT NULL,
+                    rom_id INTEGER NOT NULL,
+                    display_name TEXT NOT NULL,
+                    server_save_id INTEGER,
+                    server_content_hash TEXT,
+                    server_updated_at TEXT,
+                    detected_at INTEGER NOT NULL,
+                    dismissed_hash TEXT,
+                    PRIMARY KEY (game_key, slot)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT INTO pending_conflicts_new (
+                    game_key, slot, rom_id, display_name, server_save_id,
+                    server_content_hash, server_updated_at, detected_at, dismissed_hash
+                )
+                SELECT
+                    game_key, 'autosave', rom_id, display_name, server_save_id,
+                    server_content_hash, server_updated_at, detected_at, dismissed_hash
+                FROM pending_conflicts
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE pending_conflicts")
+            db.execSQL("ALTER TABLE pending_conflicts_new RENAME TO pending_conflicts")
+        },
     )
 
     val current: Int = all.maxOf { it.version }

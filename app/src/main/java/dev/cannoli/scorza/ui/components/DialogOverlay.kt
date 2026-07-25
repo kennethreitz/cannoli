@@ -438,7 +438,15 @@ fun DialogOverlay(
         }
 
         is DialogState.RommSaveSyncMenu -> {
-            val rows = RommSaveSyncRow.visibleRows(dialogState.supported, dialogState.enabled, dialogState.pendingConflicts, dialogState.syncErrors, dialogState.hasBackups)
+            val rows = RommSaveSyncRow.visibleRows(
+                dialogState.supported,
+                dialogState.enabled,
+                dialogState.pendingConflicts,
+                dialogState.syncErrors,
+                dialogState.hasBackups,
+                dialogState.citraAvailable,
+                dialogState.cemuAvailable,
+            )
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
             val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
                 selectedRow == RommSaveSyncRow.INTERVAL ||
@@ -514,6 +522,28 @@ fun DialogOverlay(
                             fontSize = listFontSize,
                             lineHeight = listLineHeight,
                             verticalPadding = listVerticalPadding
+                        )
+                        RommSaveSyncRow.CITRA -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_citra_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.citraLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.CEMU -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_cemu_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.cemuLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
                         )
                     }
                 }
@@ -1166,14 +1196,24 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, INTERVAL, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
-        fun visibleRows(supported: Boolean, enabled: Boolean, pendingConflicts: Int = 0, syncErrors: Int = 0, hasBackups: Boolean = false): List<RommSaveSyncRow> =
+        fun visibleRows(
+            supported: Boolean,
+            enabled: Boolean,
+            pendingConflicts: Int = 0,
+            syncErrors: Int = 0,
+            hasBackups: Boolean = false,
+            citraAvailable: Boolean = false,
+            cemuAvailable: Boolean = false,
+        ): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
                 if (supported && enabled) {
                     add(INTERVAL)
                     add(BACKUPS)
+                    if (citraAvailable) add(CITRA)
+                    if (cemuAvailable) add(CEMU)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)
                     if (syncErrors > 0) add(ERRORS)

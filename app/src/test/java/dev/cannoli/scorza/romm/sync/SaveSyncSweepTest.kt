@@ -553,6 +553,7 @@ class SaveSyncSweepTest {
         pendingStore.upsert(
             PendingConflict(
                 gameKey = "SNES/Zelda.sfc",
+                slot = DEFAULT_SLOT,
                 romId = 42,
                 displayName = "Zelda",
                 serverSaveId = 100,
@@ -564,7 +565,9 @@ class SaveSyncSweepTest {
         )
         every { client.downloadSaveContent(any(), any(), any()) } answers { thirdArg<File>().writeBytes("CORRUPT".toByteArray()) }
 
-        val ok = service.resolvePending("SNES/Zelda.sfc", keepLocal = false) { Triple("SNES", "Zelda", "snes9x") }
+        val ok = service.resolvePending("SNES/Zelda.sfc", DEFAULT_SLOT, keepLocal = false) {
+            Triple("SNES", "Zelda", "snes9x")
+        }
 
         assertEquals(false, ok)
         assertEquals("KEEP-ME", File(sd, "Saves/SNES/Zelda.srm").readText())

@@ -5,6 +5,7 @@ import dev.cannoli.scorza.romm.sync.DeleteSavesPayload
 import dev.cannoli.scorza.romm.sync.DeviceRegisterPayload
 import dev.cannoli.scorza.romm.sync.DeviceRegisterResponse
 import dev.cannoli.scorza.romm.sync.RommSaveDto
+import dev.cannoli.scorza.romm.sync.RommStateDto
 import dev.cannoli.scorza.romm.sync.SyncCompletePayload
 import dev.cannoli.scorza.romm.sync.SyncNegotiatePayload
 import dev.cannoli.scorza.romm.sync.SyncNegotiateResponse
@@ -294,6 +295,42 @@ class RommClient(
         clientProvider().newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw RommException(response.code, "HTTP ${response.code}: download save $saveId")
             val body = response.body ?: throw RommException(response.code, "Empty body downloading save $saveId")
+            dest.outputStream().use { out -> body.byteStream().copyTo(out) }
+        }
+    }
+
+    fun getStates(romId: Int): List<RommStateDto> {
+        val url = endpoint("/api/states").newBuilder()
+            .addQueryParameter("rom_id", romId.toString())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return execute(request, ListSerializer(RommStateDto.serializer()))
+    }
+
+    fun uploadState(romId: Int, emulator: String?, file: File): RommStateDto {
+        val url = endpoint("/api/states").newBuilder()
+            .addQueryParameter("rom_id", romId.toString())
+            .apply { if (emulator != null) addQueryParameter("emulator", emulator) }
+            .build()
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("stateFile", file.name, file.asRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        return execute(Request.Builder().url(url).post(multipart).build(), RommStateDto.serializer())
+    }
+
+    fun updateState(stateId: Int, file: File): RommStateDto {
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("stateFile", file.name, file.asRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val request = Request.Builder().url(endpoint("/api/states/$stateId")).put(multipart).build()
+        return execute(request, RommStateDto.serializer())
+    }
+
+    fun downloadStateContent(stateId: Int, dest: File) {
+        val request = Request.Builder().url(endpoint("/api/states/$stateId/content")).get().build()
+        clientProvider().newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw RommException(response.code, "HTTP ${response.code}: download state $stateId")
+            val body = response.body ?: throw RommException(response.code, "Empty body downloading state $stateId")
             dest.outputStream().use { out -> body.byteStream().copyTo(out) }
         }
     }

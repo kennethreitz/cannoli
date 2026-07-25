@@ -169,6 +169,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Inject lateinit var rommArtFetcher: dev.cannoli.scorza.romm.art.RommArtFetcher
     @Inject lateinit var syncScheduler: dev.cannoli.scorza.romm.sync.SyncScheduler
     @Inject lateinit var saveSyncStatusHolder: dev.cannoli.scorza.romm.sync.SaveSyncStatusHolder
+    @Inject lateinit var standaloneSaveBridge: dev.cannoli.scorza.romm.sync.StandaloneSaveBridge
     @Inject lateinit var cannoliPathsProvider: dev.cannoli.scorza.di.CannoliPathsProvider
     @field:dev.cannoli.scorza.di.IoScope @Inject lateinit var ioScope: kotlinx.coroutines.CoroutineScope
 
@@ -229,6 +230,36 @@ class MainActivity : ComponentActivity(), ActivityActions {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         bootSequencer.onStoragePermissionResult()
+    }
+
+    private var pendingStandaloneSaveKind: dev.cannoli.scorza.romm.sync.StandaloneSaveKind? = null
+    private val standaloneSaveAccessLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val kind = pendingStandaloneSaveKind
+        pendingStandaloneSaveKind = null
+        if (kind == null || result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        val uri = data.data ?: return@registerForActivityResult
+        val linked = standaloneSaveBridge.persistAccess(kind, uri, data.flags)
+        android.widget.Toast.makeText(
+            this,
+            if (linked) getString(R.string.romm_standalone_saves_connected, kind.emulatorName)
+            else getString(R.string.romm_standalone_saves_wrong_folder, kind.emulatorName),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+        val current = nav.dialogState.value
+        if (current is DialogState.RommSaveSyncMenu) {
+            nav.dialogState.value = current.copy(
+                citraLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CITRA_MMJ,
+                ),
+                cemuLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CEMU,
+                ),
+            )
+        }
+        if (linked) syncScheduler.syncNow()
     }
 
     private fun loadLoggingPrefs() {
@@ -1309,6 +1340,13 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 }
             }
         }
+    }
+
+    override fun requestStandaloneSaveAccess(
+        kind: dev.cannoli.scorza.romm.sync.StandaloneSaveKind,
+    ) {
+        pendingStandaloneSaveKind = kind
+        standaloneSaveAccessLauncher.launch(standaloneSaveBridge.accessIntent(kind))
     }
 
     private suspend fun completeRommConnection(): DialogState.RommConnected {

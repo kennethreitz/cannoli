@@ -7,4 +7,5 @@ interface ActivityActions {
     fun startRaLogin(username: String, password: String)
     fun startRommPairing(host: String)
     fun startRommCodePairing(host: String, pairCode: String)
+    fun requestStandaloneSaveAccess(kind: dev.cannoli.scorza.romm.sync.StandaloneSaveKind)
 }

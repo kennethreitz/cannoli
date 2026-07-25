@@ -32,9 +32,11 @@ class SlotManager(
         slots[DEFAULT_SLOT] = SlotInfo(DEFAULT_SLOT, active == DEFAULT_SLOT, null, null)
         for (s in server) {
             val name = s.slot ?: continue
+            if (isManagedStateSlot(name)) continue
             slots[name] = SlotInfo(name, name == active, s.updatedAt, s.id)
         }
         for (row in store.listSlots(gameKey)) {
+            if (isManagedStateSlot(row.slot)) continue
             if (!slots.containsKey(row.slot)) {
                 slots[row.slot] = SlotInfo(row.slot, row.slot == active, row.serverUpdatedAt, row.rommSaveId)
             }
@@ -50,7 +52,7 @@ class SlotManager(
         emulator: String?,
         name: String,
     ) = withContext(Dispatchers.IO) {
-        require(name.isNotBlank() && name != DEFAULT_SLOT)
+        requireValidUserSlot(name)
         val deviceId = registrar.deviceId() ?: return@withContext
         service.uploadActive(tag, base, gameKey, name, romId, emulator, deviceId, overwrite = false)
         store.setActiveSlot(gameKey, name)
@@ -64,10 +66,11 @@ class SlotManager(
         emulator: String?,
         target: String,
     ) = withContext(Dispatchers.IO) {
+        require(!isManagedStateSlot(target)) { "managed save-state slots cannot be selected" }
         val deviceId = registrar.deviceId() ?: return@withContext
         val current = store.activeSlot(gameKey)
         if (current == target) return@withContext
-        val local = resolver.resolve(tag, base)
+        val local = service.localSave(tag, base, gameKey, emulator)
         val anchor = store.get(gameKey, current)
         if (local != null && anchor?.localContentHash != local.contentHash) {
             runCatching { service.uploadActive(tag, base, gameKey, current, romId, emulator, deviceId, overwrite = false) }
@@ -79,10 +82,8 @@ class SlotManager(
             val tmp = File.createTempFile("romm-slot", ".bin", paths.configCache.apply { mkdirs() })
             try {
                 client.downloadSaveContent(serverLatest.id, deviceId, tmp)
-                service.backupBeforeDownload(tag, base)
-                resolver.applyDownload(tag, base, tmp)
+                val hash = service.applySlotDownload(tag, base, gameKey, emulator, tmp)
                 val confirmed = runCatching { client.confirmSaveDownloaded(serverLatest.id, deviceId) }.getOrNull()
-                val hash = resolver.resolve(tag, base)?.contentHash
                 store.upsert(
                     SaveSyncRow(
                         gameKey = gameKey,
@@ -105,6 +106,7 @@ class SlotManager(
 
     suspend fun delete(gameKey: String, romId: Int, slot: String) = withContext(Dispatchers.IO) {
         require(slot != DEFAULT_SLOT) { "autosave cannot be deleted" }
+        require(!isManagedStateSlot(slot)) { "managed save-state slots cannot be deleted" }
         val deviceId = registrar.deviceId()
         val serverIds = if (deviceId != null) {
             runCatching { client.getSaves(romId, deviceId) }.getOrDefault(emptyList())
@@ -127,7 +129,8 @@ class SlotManager(
         newSlot: String,
     ) = withContext(Dispatchers.IO) {
         require(oldSlot != DEFAULT_SLOT) { "autosave cannot be renamed" }
-        require(newSlot.isNotBlank() && newSlot != DEFAULT_SLOT)
+        require(!isManagedStateSlot(oldSlot)) { "managed save-state slots cannot be renamed" }
+        requireValidUserSlot(newSlot)
         val deviceId = registrar.deviceId() ?: return@withContext
         val isActive = store.activeSlot(gameKey) == oldSlot
         if (isActive) {
@@ -165,4 +168,12 @@ class SlotManager(
         if (isActive) store.setActiveSlot(gameKey, newSlot)
     }
 
+    private fun requireValidUserSlot(slot: String) {
+        require(slot.isNotBlank() && slot != DEFAULT_SLOT && !isManagedStateSlot(slot)) {
+            "invalid user save slot"
+        }
+    }
+
+    private fun isManagedStateSlot(slot: String): Boolean =
+        slot.startsWith(LibretroStateBridge.STATE_SLOT_PREFIX)
 }

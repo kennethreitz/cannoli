@@ -80,6 +80,18 @@ data class RommSaveDto(
 )
 
 @Serializable
+data class RommStateDto(
+    val id: Int,
+    @SerialName("rom_id") val romId: Int = 0,
+    @SerialName("file_name") val fileName: String = "",
+    @SerialName("file_size_bytes") val fileSizeBytes: Long = 0,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+    val emulator: String? = null,
+    @SerialName("download_path") val downloadPath: String? = null,
+)
+
+@Serializable
 data class DeleteSavesPayload(val saves: List<Int>)
 
 @Serializable

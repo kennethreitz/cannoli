@@ -35,4 +35,16 @@ class RommMenuRowTest {
         assertEquals(true, enabled.contains(RommSaveSyncRow.INTERVAL))
         assertEquals(false, disabled.contains(RommSaveSyncRow.INTERVAL))
     }
+
+    @Test fun `installed standalone emulators appear as experimental save connections`() {
+        val rows = RommSaveSyncRow.visibleRows(
+            supported = true,
+            enabled = true,
+            citraAvailable = true,
+            cemuAvailable = true,
+        )
+
+        assertEquals(true, rows.contains(RommSaveSyncRow.CITRA))
+        assertEquals(true, rows.contains(RommSaveSyncRow.CEMU))
+    }
 }

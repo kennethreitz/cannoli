@@ -10,7 +10,12 @@ object RomKeys {
 
     fun coreDisplayNameFor(rom: Rom, platformConfig: PlatformConfig): String? {
         val override = platformConfig.getGameOverride(rom.path.absolutePath)
-        val coreId = override?.coreId ?: platformConfig.getCoreName(rom.platformTag) ?: return null
+        val standaloneApp = override?.appPackage
+            ?: platformConfig.getSelectedStandaloneAppPackage(rom.platformTag)
+        if (standaloneApp != null) return platformConfig.getAppDisplayName(standaloneApp)
+        val coreId = override?.coreId?.takeIf { it.isNotEmpty() }
+            ?: platformConfig.getCoreName(rom.platformTag)
+            ?: return null
         return platformConfig.getCoreDisplayName(coreId)
     }
 }
