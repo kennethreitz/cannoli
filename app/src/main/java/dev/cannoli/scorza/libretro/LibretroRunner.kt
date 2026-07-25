@@ -75,6 +75,10 @@ class LibretroRunner {
 
     fun saveState(path: String): Boolean = nativeSaveState(path)
     fun loadState(path: String): Boolean = nativeLoadState(path)
+    fun captureRewindState(maxBytes: Int): Int = nativeCaptureRewindState(maxBytes)
+    fun rewind(steps: Int): Int = nativeRewind(steps)
+    fun getRewindStateCount(): Int = nativeGetRewindStateCount()
+    fun clearRewindHistory() = nativeClearRewindHistory()
     fun saveSRAM(path: String): Boolean = nativeSaveSRAM(path)
     fun loadSRAM(path: String): Boolean = nativeLoadSRAM(path)
 
@@ -180,6 +184,10 @@ class LibretroRunner {
     private external fun nativeCopyLastFrame(buffer: ByteBuffer)
     private external fun nativeSaveState(path: String): Boolean
     private external fun nativeLoadState(path: String): Boolean
+    private external fun nativeCaptureRewindState(maxBytes: Int): Int
+    private external fun nativeRewind(steps: Int): Int
+    private external fun nativeGetRewindStateCount(): Int
+    private external fun nativeClearRewindHistory()
     private external fun nativeSaveSRAM(path: String): Boolean
     private external fun nativeLoadSRAM(path: String): Boolean
     private external fun nativeApplyEmuCheats(codes: Array<String>)

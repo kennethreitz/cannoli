@@ -132,7 +132,7 @@ class BootInitializer @Inject constructor(
             bindingController.onCommit = { chord ->
                 val cs = nav.currentScreen
                 if (cs is LauncherScreen.ShortcutBinding) {
-                    val action = dev.cannoli.igm.ShortcutAction.entries.getOrNull(cs.selectedIndex)
+                    val action = cs.actions.getOrNull(cs.selectedIndex)
                     if (action != null) {
                         val cleared = cs.shortcuts.filterValues { it != chord }
                         nav.replaceTop(cs.copy(

@@ -8,21 +8,21 @@ class HoldFfTest {
 
     @Test
     fun holdsWhileWholeChordStaysPressed() {
-        assertFalse(shouldReleaseHoldFf(setOf(102, 103), setOf(102, 103, 96)))
+        assertFalse(shouldReleaseHoldShortcut(setOf(102, 103), setOf(102, 103, 96)))
     }
 
     @Test
     fun releasesOnceAChordKeyLifts() {
-        assertTrue(shouldReleaseHoldFf(setOf(102, 103), setOf(102)))
+        assertTrue(shouldReleaseHoldShortcut(setOf(102, 103), setOf(102)))
     }
 
     @Test
     fun releasesWhenBindingClearedWhileHeld() {
-        assertTrue(shouldReleaseHoldFf(emptySet(), setOf(102, 103)))
+        assertTrue(shouldReleaseHoldShortcut(emptySet(), setOf(102, 103)))
     }
 
     @Test
     fun releasesWhenBindingRemovedWhileHeld() {
-        assertTrue(shouldReleaseHoldFf(null, setOf(102, 103)))
+        assertTrue(shouldReleaseHoldShortcut(null, setOf(102, 103)))
     }
 }

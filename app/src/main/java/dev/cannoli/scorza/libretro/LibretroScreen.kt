@@ -67,6 +67,7 @@ fun LibretroScreen(
     audioSampleRate: Int,
     osdController: dev.cannoli.ui.components.OsdController,
     fastForwarding: Boolean,
+    rewinding: Boolean,
     settings: dev.cannoli.scorza.settings.SettingsRepository,
     guideFiles: List<GuideFile> = emptyList(),
     cheatSections: List<dev.cannoli.ui.components.ListSection<dev.cannoli.igm.CheatRowUi>> = emptyList(),
@@ -193,13 +194,18 @@ fun LibretroScreen(
             }
         }
 
-        if ((showFps || fastForwarding) && !overlayVisible) {
+        if ((showFps || fastForwarding || rewinding) && !overlayVisible) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 16.dp, end = 16.dp)
             ) {
-                StatusPill(showFps = showFps, fastForwarding = fastForwarding, renderer = renderer)
+                StatusPill(
+                    showFps = showFps,
+                    fastForwarding = fastForwarding,
+                    rewinding = rewinding,
+                    renderer = renderer,
+                )
             }
         }
 
@@ -226,7 +232,12 @@ fun LibretroScreen(
 }
 
 @Composable
-private fun StatusPill(showFps: Boolean, fastForwarding: Boolean, renderer: LibretroRenderer) {
+private fun StatusPill(
+    showFps: Boolean,
+    fastForwarding: Boolean,
+    rewinding: Boolean,
+    renderer: LibretroRenderer,
+) {
     val colors = LocalCannoliColors.current
     val fpsValue = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(showFps) {
@@ -237,7 +248,8 @@ private fun StatusPill(showFps: Boolean, fastForwarding: Boolean, renderer: Libr
     }
     val text = buildString {
         if (fastForwarding) append("▶▶")
-        if (fastForwarding && showFps) append("  ")
+        if (rewinding) append("◀◀")
+        if ((fastForwarding || rewinding) && showFps) append("  ")
         if (showFps) append("%.2f".format(fpsValue.floatValue))
     }
     Box(

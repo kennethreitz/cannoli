@@ -239,8 +239,18 @@ sealed class LauncherScreen {
         override val itemCount: Int get() = dev.cannoli.scorza.util.LoggingPrefs.Category.entries.size
         override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
     }
-    data class ShortcutBinding(override val selectedIndex: Int = 0, override val scrollTarget: Int = 0, val shortcuts: Map<ShortcutAction, Set<Int>> = emptyMap(), val listening: Boolean = false, val heldKeys: Set<Int> = emptySet(), val countdownMs: Int = 0) : LauncherScreen(), ScrollableScreen {
-        override val itemCount: Int get() = ShortcutAction.entries.size
+    data class ShortcutBinding(
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0,
+        val shortcuts: Map<ShortcutAction, Set<Int>> = emptyMap(),
+        val listening: Boolean = false,
+        val heldKeys: Set<Int> = emptySet(),
+        val countdownMs: Int = 0,
+        val experimentalFeatures: Boolean = false,
+    ) : LauncherScreen(), ScrollableScreen {
+        val actions: List<ShortcutAction>
+            get() = dev.cannoli.igm.availableShortcutActions(experimentalFeatures)
+        override val itemCount: Int get() = actions.size
         override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
     }
     data class Credits(override val selectedIndex: Int = 0, override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
@@ -1069,7 +1079,7 @@ fun AppNavGraph(
                     buttonStyle = labels
                 ) {
                     List(
-                        items = ShortcutAction.entries.toList(),
+                        items = currentScreen.actions,
                         selectedIndex = currentScreen.selectedIndex,
                         itemHeight = itemHeight,
                         scrollTarget = currentScreen.scrollTarget,
@@ -1100,7 +1110,7 @@ fun AppNavGraph(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth()
                         ) {
-                            val actionName = ShortcutAction.entries.getOrNull(currentScreen.selectedIndex)
+                            val actionName = currentScreen.actions.getOrNull(currentScreen.selectedIndex)
                                 ?.let { stringResource(it.labelRes) } ?: ""
                             Text(
                                 text = actionName,

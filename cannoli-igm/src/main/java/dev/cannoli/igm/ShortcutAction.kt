@@ -14,6 +14,12 @@ enum class ShortcutAction(@StringRes val labelRes: Int) {
     TOGGLE_SHOW_FPS(R.string.shortcut_action_toggle_show_fps),
     TOGGLE_FF(R.string.shortcut_action_toggle_ff),
     HOLD_FF(R.string.shortcut_action_hold_ff),
+    HOLD_REWIND(R.string.shortcut_action_hold_rewind),
     OPEN_GUIDE(R.string.shortcut_action_open_guide),
     OPEN_MENU(R.string.shortcut_action_open_menu)
 }
+
+fun availableShortcutActions(experimentalFeatures: Boolean): List<ShortcutAction> =
+    ShortcutAction.entries.filter {
+        experimentalFeatures || it != ShortcutAction.HOLD_REWIND
+    }

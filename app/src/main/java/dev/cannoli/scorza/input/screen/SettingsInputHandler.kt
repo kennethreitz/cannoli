@@ -146,7 +146,10 @@ class SettingsInputHandler @Inject constructor(
             "screen_geometry" -> settingsViewModel.enterSubCategory("screen_geometry", dev.cannoli.scorza.R.string.setting_screen_geometry)
             "logging" -> nav.push(LauncherScreen.LoggingSettings())
             "audit_emulator_intents" -> runIntentAudit()
-            "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(shortcuts = globalOverrides.readShortcuts()))
+            "shortcuts" -> nav.push(LauncherScreen.ShortcutBinding(
+                shortcuts = globalOverrides.readShortcuts(),
+                experimentalFeatures = settings.experimentalFeatures,
+            ))
             "input_tester" -> {
                 inputTesterController.enter()
                 nav.push(LauncherScreen.InputTester)

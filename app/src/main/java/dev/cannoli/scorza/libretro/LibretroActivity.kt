@@ -45,6 +45,7 @@ import dev.cannoli.igm.IgmMenuAction
 import dev.cannoli.igm.InGameMenuOptions
 import dev.cannoli.igm.ProviderSettingsController
 import dev.cannoli.igm.ShortcutAction
+import dev.cannoli.igm.availableShortcutActions
 import dev.cannoli.scorza.R
 import dev.cannoli.scorza.libretro.settings.LauncherIgmSettingsProvider
 import dev.cannoli.scorza.libretro.settings.LauncherSettingsHost
@@ -164,6 +165,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var showFps by mutableStateOf(false)
     override var showFpsBaseline by mutableStateOf(false)
     override var maxFfSpeed by mutableIntStateOf(4)
+    override var maxRewindSpeed by mutableIntStateOf(4)
     private var overlay by mutableStateOf("")
     private var overlayImages = emptyList<String>()
 
@@ -243,6 +245,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var lastSoftwareVolumeIndex = -1
     private var fastForwarding by mutableStateOf(false)
     private var holdingFf = false
+    private var rewinding by mutableStateOf(false)
+    private var holdingRewind = false
 
     private val pendingHoldHandler = Handler(Looper.getMainLooper())
     private val pendingHoldRunnable = Runnable { firePendingHold() }
@@ -281,9 +285,23 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     }
 
     private fun setFastForward(enabled: Boolean) {
+        if (enabled && rewinding) setRewind(false)
         fastForwarding = enabled
         renderer.fastForwardFrames = if (enabled) maxFfSpeed else 0
-        runner.setAudioMuted(enabled)
+        runner.setAudioMuted(enabled || rewinding)
+    }
+
+    private fun setRewind(enabled: Boolean) {
+        if (enabled && !experimentalFeatures) return
+        if (enabled && fastForwarding) setFastForward(false)
+        rewinding = enabled
+        renderer.rewinding = enabled
+        renderer.rewindFrames = maxRewindSpeed
+        runner.setAudioMuted(enabled || fastForwarding)
+    }
+
+    private fun invalidateRewindHistory() {
+        if (::renderer.isInitialized) renderer.clearRewindHistory()
     }
 
     private fun performSaveAndQuit() {
@@ -455,6 +473,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     companion object {
         private val FF_SPEEDS = listOf(2, 3, 4, 6, 8)
+        private val REWIND_SPEEDS = listOf(1, 2, 3, 4, 6, 8)
 
         // Substrings (lowercase) matched against "<key> <desc>" for cores declaring hw_render=true.
         // These options only take effect with a hardware GL/Vulkan context, which the built-in
@@ -735,6 +754,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                                 audioSampleRate = audioSampleRate,
                                 osdController = osdController,
                                 fastForwarding = fastForwarding,
+                                rewinding = rewinding,
                                 settings = settings,
                                 guideFiles = guideFiles,
                                 cheatSections = cheatSections,
@@ -879,6 +899,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     backend.sharpness = sharpness
                     backend.screenEffect = screenEffect
                     backend.debugHud = debugHud
+                    backend.rewindEnabled = experimentalFeatures
+                    backend.rewindFrames = maxRewindSpeed
                     backend.overlayPath = resolveOverlayPath()
                     backend.shaderPresetPath = resolveShaderPresetPath()
                     backend.portraitMarginPx = settings.portraitMarginPx
@@ -1638,9 +1660,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         val portKeys = portPressedKeys[port]
         portKeys.remove(keyCode)
         portConsumedKeys[port].remove(keyCode)
-        if (holdingFf && shouldReleaseHoldFf(shortcuts[ShortcutAction.HOLD_FF], portKeys)) {
+        if (holdingFf && shouldReleaseHoldShortcut(shortcuts[ShortcutAction.HOLD_FF], portKeys)) {
             holdingFf = false
             setFastForward(false)
+        }
+        if (holdingRewind &&
+            shouldReleaseHoldShortcut(shortcuts[ShortcutAction.HOLD_REWIND], portKeys)
+        ) {
+            holdingRewind = false
+            setRewind(false)
         }
         checkPendingHoldRelease(port)
     }
@@ -1672,6 +1700,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         val portKeys = portPressedKeys[port]
         val consumed = portConsumedKeys[port]
         for ((action, chord) in shortcuts) {
+            if (action == ShortcutAction.HOLD_REWIND && !experimentalFeatures) continue
             if (chord.isEmpty() || !portKeys.containsAll(chord)) continue
             if (chord.any { it in consumed }) continue
             when (action) {
@@ -1684,6 +1713,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 ShortcutAction.LOAD_STATE -> {
                     if (stateBasePath.isNotEmpty() && slotManager.stateExists(currentSlot)) {
                         slotManager.loadState(runner, currentSlot)
+                        invalidateRewindHistory()
                         sessionLog.log("RA state load (shortcut): slot=${currentSlot.label}")
                         showOsd(getString(R.string.osd_state_loaded, currentSlot.label), OsdPosition.BottomCenter)
                     }
@@ -1696,6 +1726,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                         startUndoTimer(30_000)
                     }
                     runner.reset()
+                    invalidateRewindHistory()
                     showOsd(getString(R.string.osd_reset), OsdPosition.BottomCenter)
                 }
                 ShortcutAction.SAVE_AND_QUIT -> {
@@ -1722,6 +1753,18 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 ShortcutAction.HOLD_FF -> {
                     if (holdingFf) continue
                     holdingFf = true; setFastForward(true)
+                }
+                ShortcutAction.HOLD_REWIND -> {
+                    if (holdingRewind) continue
+                    if (!renderer.rewindSupported) {
+                        showOsd(getString(R.string.osd_rewind_unsupported), OsdPosition.BottomCenter)
+                    } else {
+                        if (!renderer.rewindHistoryAvailable) {
+                            showOsd(getString(R.string.osd_rewind_empty), OsdPosition.BottomCenter)
+                        }
+                        holdingRewind = true
+                        setRewind(true)
+                    }
                 }
                 ShortcutAction.OPEN_MENU -> {
                     openMenu()
@@ -1758,6 +1801,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     private fun openMenu() {
         sessionLog.log("openMenu: enter")
+        if (rewinding) {
+            holdingRewind = false
+            setRewind(false)
+        }
         cancelPendingHold()
         raManager?.idle()
         sessionLog.log("openMenu: raIdle")
@@ -1803,6 +1850,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (holdingFf) {
             holdingFf = false
             setFastForward(false)
+        }
+        if (holdingRewind || rewinding) {
+            holdingRewind = false
+            setRewind(false)
         }
         cancelPendingHold()
         for (p in 0 until LibretroRunner.MAX_PORTS) runner.setInput(p, 0)
@@ -1939,6 +1990,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     undoSlot = null
                     startUndoTimer()
                     slotManager.loadState(runner, slot)
+                    invalidateRewindHistory()
                     sessionLog.log("RA state load (IGM): slot=${slot.label}")
                     showOsd(getString(R.string.osd_state_loaded, slot.label), OsdPosition.BottomCenter)
                 }
@@ -1973,6 +2025,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     startUndoTimer(30_000)
                 }
                 runner.reset()
+                invalidateRewindHistory()
                 sessionLog.log("RA reset (IGM game reset)")
                 raManager?.reset()
                 showOsd(getString(R.string.osd_reset), OsdPosition.BottomCenter)
@@ -2490,6 +2543,13 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (fastForwarding) renderer.fastForwardFrames = maxFfSpeed
     }
 
+    override fun cycleRewindSpeed(direction: Int) {
+        val idx = REWIND_SPEEDS.indexOf(maxRewindSpeed).coerceAtLeast(0)
+        maxRewindSpeed =
+            REWIND_SPEEDS[(idx + direction + REWIND_SPEEDS.size) % REWIND_SPEEDS.size]
+        if (rewinding) renderer.rewindFrames = maxRewindSpeed
+    }
+
     // --- Emulator ---
 
     private fun loadVisibleCoreOptions(): List<LibretroRunner.CoreOption> {
@@ -2517,6 +2577,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     // --- Shortcuts ---
 
+    private val configurableShortcutActions: List<ShortcutAction>
+        get() = availableShortcutActions(experimentalFeatures)
+
     private fun wireBindingController() {
         bindingController.onProgress = { keys, elapsedMs ->
             val cs = currentScreen
@@ -2528,7 +2591,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             val cs = currentScreen
             if (cs is IGMScreen.Shortcuts) {
                 // selectedIndex 0 is the source picker; actions start at 1.
-                val action = ShortcutAction.entries.getOrNull(cs.selectedIndex - 1)
+                val action = configurableShortcutActions.getOrNull(cs.selectedIndex - 1)
                 if (action != null) {
                     val cleared = shortcuts.filterValues { it != chord }
                     shortcuts = cleared + (action to chord)
@@ -2550,7 +2613,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             bindingController.keyDown(rawKeyCode)
             return true
         }
-        val count = ShortcutAction.entries.size + 1
+        val count = configurableShortcutActions.size + 1
         return when (button) {
             "btn_up" -> {
                 replaceTop(screen.copy(selectedIndex = wrapIndex(screen.selectedIndex, count, -1))); true
@@ -2575,7 +2638,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             }
             "btn_north" -> {
                 if (screen.selectedIndex > 0) {
-                    val action = ShortcutAction.entries[screen.selectedIndex - 1]
+                    val action = configurableShortcutActions[screen.selectedIndex - 1]
                     shortcuts = shortcuts + (action to emptySet())
                     saveCurrentShortcuts()
                 }
@@ -2608,7 +2671,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
         is IGMScreen.Shortcuts -> buildList {
             add(IGMSettingsItem("Source", sourceLabel(shortcutSource)))
-            for (action in ShortcutAction.entries) {
+            for (action in configurableShortcutActions) {
                 val chord = shortcuts[action]
                 val label = if (chord.isNullOrEmpty()) "None"
                 else chord.joinToString(" + ") { shortcutKeyLabel(it) }
@@ -2689,6 +2752,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             debugHud = debugHud,
             showFps = showFpsBaseline,
             maxFfSpeed = maxFfSpeed,
+            maxRewindSpeed = maxRewindSpeed,
             shaderPreset = shaderPreset,
             overlay = overlay,
             coreOptions = optionMap,
@@ -2731,6 +2795,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         showFps = settings.showFps
         showFpsBaseline = settings.showFps
         maxFfSpeed = settings.maxFfSpeed
+        maxRewindSpeed = settings.maxRewindSpeed
         shaderPreset = settings.shaderPreset
         overlay = settings.overlay
         shortcutSource = settings.shortcutSource
@@ -2887,6 +2952,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             UndoType.SAVE -> undoSlot?.let { slotManager.performUndoSave(it) }
             UndoType.LOAD, UndoType.RESET -> slotManager.performUndoLoad(runner)
         }
+        if (type == UndoType.LOAD || type == UndoType.RESET) invalidateRewindHistory()
         clearUndo()
         refreshSlotInfo()
         showOsd(label, OsdPosition.BottomCenter)

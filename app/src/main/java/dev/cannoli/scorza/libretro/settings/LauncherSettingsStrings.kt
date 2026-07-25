@@ -13,6 +13,7 @@ data class LauncherSettingsStrings(
     val shaderSettings: String = "Shader Settings",
     val overlay: String = "Overlay",
     val maxFfSpeed: String = "Max FF Speed",
+    val maxRewindSpeed: String = "Max Rewind Speed",
     val showFps: String = "Show FPS",
     val debugHud: String = "Debug HUD",
     val controllerType: String = "Controller Type",
