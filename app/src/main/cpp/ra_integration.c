@@ -663,6 +663,21 @@ Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetGameTitle(JNI
     return (*env)->NewStringUTF(env, title);
 }
 
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetRichPresence(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    char message[1024];
+    message[0] = '\0';
+    if (g_client &&
+        rc_client_is_game_loaded(g_client) &&
+        g_memory_initialized &&
+        rc_client_has_rich_presence(g_client)) {
+        rc_client_get_rich_presence_message(g_client, message, sizeof(message));
+        message[sizeof(message) - 1] = '\0';
+    }
+    return (*env)->NewStringUTF(env, message);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeIsMemoryInitialized(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;

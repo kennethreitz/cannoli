@@ -242,6 +242,7 @@ class SettingsViewModel @Inject constructor(
         val dualScreenLaunching: Boolean,
         val topScreenBlackout: Boolean,
         val dimLauncherDuringGames: Boolean,
+        val universalCompanionDeck: Boolean,
         val showWifi: Boolean,
         val showBluetooth: Boolean,
         val showVpn: Boolean,
@@ -581,6 +582,9 @@ class SettingsViewModel @Inject constructor(
             "rewind_enabled" -> {
                 settings.rewindEnabled = !settings.rewindEnabled
             }
+            "universal_companion_deck" -> {
+                settings.universalCompanionDeck = !settings.universalCompanionDeck
+            }
             "ra_package" -> {
                 val pkgs = detectInstalledRaPackages()
                 if (pkgs.isNotEmpty()) {
@@ -723,6 +727,7 @@ class SettingsViewModel @Inject constructor(
         dualScreenLaunching = settings.dualScreenLaunching,
         topScreenBlackout = settings.topScreenBlackout,
         dimLauncherDuringGames = settings.dimLauncherDuringGames,
+        universalCompanionDeck = settings.universalCompanionDeck,
         showWifi = settings.showWifi,
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
@@ -765,6 +770,7 @@ class SettingsViewModel @Inject constructor(
         settings.dualScreenLaunching = snap.dualScreenLaunching
         settings.topScreenBlackout = snap.topScreenBlackout
         settings.dimLauncherDuringGames = snap.dimLauncherDuringGames
+        settings.universalCompanionDeck = snap.universalCompanionDeck
         settings.showWifi = snap.showWifi
         settings.showBluetooth = snap.showBluetooth
         settings.showVpn = snap.showVpn
@@ -971,6 +977,13 @@ class SettingsViewModel @Inject constructor(
                     "rewind_enabled",
                     R.string.setting_rewind,
                     valueRes = onOff(settings.rewindEnabled),
+                ))
+                add(SettingsItem(
+                    "universal_companion_deck",
+                    R.string.setting_universal_companion_deck,
+                    valueRes = onOff(settings.universalCompanionDeck),
+                    disabled = !settings.dualScreenLaunching ||
+                        (!activityDisplayRouter.isDualScreenAvailable && !settings.universalCompanionDeck),
                 ))
                 add(SettingsItem(
                     "dual_screen_launching",

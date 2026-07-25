@@ -3,6 +3,7 @@ package dev.cannoli.scorza.launcher
 import dev.cannoli.scorza.libretro.PokemonFireEmeraldSnapshot
 import dev.cannoli.scorza.libretro.SotnMapSnapshot
 import dev.cannoli.scorza.libretro.SuperMarioWorldSnapshot
+import dev.cannoli.scorza.libretro.UniversalCompanionSnapshot
 import dev.cannoli.scorza.model.Rom
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,8 @@ import javax.inject.Singleton
 class LaunchState @Inject constructor() {
     @Volatile var launching: Boolean = false
     @Volatile var lastLaunched: Rom? = null
+    @Volatile var gameStartedAtMillis: Long? = null
+        private set
 
     private val _gameActive = MutableStateFlow(false)
     val gameActive: StateFlow<Boolean> = _gameActive
@@ -26,18 +29,25 @@ class LaunchState @Inject constructor() {
     private val _superMarioWorld = MutableStateFlow<SuperMarioWorldSnapshot?>(null)
     val superMarioWorld: StateFlow<SuperMarioWorldSnapshot?> = _superMarioWorld
 
+    private val _universalCompanion = MutableStateFlow<UniversalCompanionSnapshot?>(null)
+    val universalCompanion: StateFlow<UniversalCompanionSnapshot?> = _universalCompanion
+
     fun markGameStarted() {
         _sotnMap.value = null
         _pokemonFireEmerald.value = null
         _superMarioWorld.value = null
+        _universalCompanion.value = null
+        gameStartedAtMillis = System.currentTimeMillis()
         _gameActive.value = true
     }
 
     fun markGameEnded() {
         _gameActive.value = false
+        gameStartedAtMillis = null
         _sotnMap.value = null
         _pokemonFireEmerald.value = null
         _superMarioWorld.value = null
+        _universalCompanion.value = null
     }
 
     fun updateSotnMap(snapshot: SotnMapSnapshot) {
@@ -50,5 +60,9 @@ class LaunchState @Inject constructor() {
 
     fun updateSuperMarioWorld(snapshot: SuperMarioWorldSnapshot) {
         _superMarioWorld.value = snapshot
+    }
+
+    fun updateUniversalCompanion(snapshot: UniversalCompanionSnapshot) {
+        _universalCompanion.value = snapshot
     }
 }

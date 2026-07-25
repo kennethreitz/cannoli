@@ -110,6 +110,10 @@ class RetroAchievementsManager(
     val gameId: Int get() = nativeGetGameId()
     val gameTitle: String get() = nativeGetGameTitle()
     val gameHash: String get() = nativeGetGameHash()
+    val richPresence: String?
+        get() = nativeGetRichPresence()
+            .trim()
+            .takeIf(String::isNotEmpty)
     val isOnline: Boolean get() {
         val cm = context?.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
         val network = cm.activeNetwork ?: return false
@@ -418,6 +422,7 @@ class RetroAchievementsManager(
     private external fun nativeGetUsername(): String
     private external fun nativeGetGameId(): Int
     private external fun nativeGetGameTitle(): String
+    private external fun nativeGetRichPresence(): String
     private external fun nativeGetUserAgentClause(): String
     private external fun nativeHttpResponse(requestPtr: Long, body: String, httpStatus: Int)
     private external fun nativeGetAchievementData(): String
