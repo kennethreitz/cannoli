@@ -303,6 +303,9 @@ class SaveSyncService(
             return NativeStateSyncResult(ok = false, label = "state lookup failed (${errLabel(t)})")
         }
         val server = states.firstOrNull { it.fileName == remoteFileName }
+        if (server != null && local != null) {
+            retireLegacyStateSaves(base, romId, slot, deviceId)
+        }
         val interoperable = newestInteroperableState(states, remoteFileName, emulator)
         if (interoperable != null &&
             (server == null || stateTimeMillis(interoperable) > stateTimeMillis(server))
@@ -316,9 +319,13 @@ class SaveSyncService(
             val legacy = findLegacyState(base, gameKey, romId, slot, deviceId)
             if (legacy != null) {
                 return try {
-                    importLegacyState(
+                    val result = importLegacyState(
                         tag, base, gameKey, slot, romId, emulator, deviceId, legacy, force = false,
                     )
+                    if (result.ok) {
+                        retireLegacyStateSaves(base, romId, slot, deviceId)
+                    }
+                    result
                 } finally {
                     legacy.file.delete()
                 }
@@ -471,6 +478,35 @@ class SaveSyncService(
             }
         }
         return null
+    }
+
+    private fun retireLegacyStateSaves(
+        base: String,
+        romId: Int,
+        slot: String,
+        deviceId: String,
+    ) {
+        val legacyIds = try {
+            client.getSaves(romId, deviceId)
+                .filter { (it.slot ?: DEFAULT_SLOT) == slot }
+                .map { it.id }
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "legacy state cleanup lookup failed [$base]: ${errLabel(t)}",
+            )
+            return
+        }
+        if (legacyIds.isEmpty()) return
+        try {
+            client.deleteSaves(legacyIds)
+            dev.cannoli.scorza.util.RommLog.write(
+                "retired ${legacyIds.size} legacy save-state row(s) [$base]",
+            )
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "legacy state cleanup failed [$base]: ${errLabel(t)}",
+            )
+        }
     }
 
     private fun importLegacyState(
