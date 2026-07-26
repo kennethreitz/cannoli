@@ -192,5 +192,73 @@ class SaveSyncLibretroStatesTest {
         assertEquals("SERVER-LEGACY", stateFile.readText())
         verify(exactly = 1) { client.downloadSaveContent(197, "dev-1", any()) }
         verify(exactly = 1) { client.downloadSaveContent(165, "dev-1", any()) }
+        verify(exactly = 1) { client.deleteSaves(listOf(197, 165)) }
+    }
+
+    @Test fun `confirmed native state retires only its managed legacy save rows`() = runBlocking {
+        val local = bridge.refreshArchive("SNES", "Zelda", "SNES/Zelda.sfc")!!
+        val updatedAt = "2026-07-25T12:00:00Z"
+        store.upsert(
+            SaveSyncRow(
+                gameKey = "SNES/Zelda.sfc",
+                slot = stateSlot,
+                rommRomId = 42,
+                rommSaveId = 99,
+                lastSyncedAt = updatedAt,
+                lastUploadedHash = local.contentHash,
+                localContentHash = local.contentHash,
+                serverUpdatedAt = updatedAt,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+        every { client.getStates(42) } returns listOf(
+            RommStateDto(
+                id = 99,
+                romId = 42,
+                fileName = local.uploadFileName,
+                updatedAt = updatedAt,
+            ),
+        )
+        every { client.getSaves(42, "dev-1") } returnsMany listOf(
+            listOf(
+                RommSaveDto(id = 158, slot = stateSlot),
+                RommSaveDto(id = 159, slot = "autosave"),
+                RommSaveDto(id = 160, slot = "${LibretroStateBridge.STATE_SLOT_PREFIX}another-core"),
+            ),
+            emptyList(),
+        )
+
+        val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
+
+        assertTrue(outcome is PreLaunchOutcome.Proceed)
+        verify(exactly = 1) { client.deleteSaves(listOf(158)) }
+        verify(exactly = 0) { client.deleteSaves(match { 159 in it || 160 in it }) }
+    }
+
+    @Test fun `failed legacy migration keeps the legacy save row`() = runBlocking {
+        val legacyArchive = tmp.newFile("failed-legacy-state.zip")
+        bridge.refreshArchive("SNES", "Zelda", "SNES/Zelda.sfc")!!.files.single()
+            .copyTo(legacyArchive, overwrite = true)
+        stateFile.setLastModified(1_000L)
+
+        every { client.getStates(42) } returns emptyList()
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(
+                id = 158,
+                slot = stateSlot,
+                contentHash = SaveHasher.hashFile(legacyArchive),
+                updatedAt = "2099-01-01T00:00:00Z",
+            ),
+        )
+        every { client.downloadSaveContent(158, "dev-1", any()) } answers {
+            legacyArchive.copyTo(thirdArg(), overwrite = true)
+        }
+        every { client.uploadState(42, "Snes9x", any()) } throws
+            IllegalStateException("server rejected state")
+
+        val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
+
+        assertTrue(outcome is PreLaunchOutcome.Proceed)
+        verify(exactly = 0) { client.deleteSaves(any()) }
     }
 }
