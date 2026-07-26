@@ -965,16 +965,18 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                         universalCompanionFrame = 0
                         val ra = raManager
                         val memoryReady = ra?.isMemoryInitialized == true && ra.gameId > 0
-                        val achievements = if (memoryReady) ra?.getAchievements().orEmpty() else emptyList()
-                        launchState.updateUniversalCompanion(
+                        val snapshot = if (memoryReady) {
+                            ra.getUniversalCompanionSnapshot()
+                        } else {
                             UniversalCompanionSnapshot(
-                                richPresence = if (memoryReady) ra?.richPresence else null,
-                                memoryReady = memoryReady,
-                                unlockedAchievements = achievements.count { it.unlocked },
-                                totalAchievements = achievements.size,
+                                richPresence = null,
+                                memoryReady = false,
+                                unlockedAchievements = 0,
+                                totalAchievements = 0,
                                 observedAtMillis = System.currentTimeMillis(),
                             )
-                        )
+                        }
+                        launchState.updateUniversalCompanion(snapshot)
                     }
                     if (startupCountdown > 0 && --startupCountdown == 0) {
                         runner.setAudioMuted(false)

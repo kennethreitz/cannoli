@@ -26,6 +26,7 @@ static JavaVM *g_jvm = NULL;
 static jobject g_manager = NULL;
 static jmethodID g_onServerCall = NULL;
 static jmethodID g_onEvent = NULL;
+static jmethodID g_onCompanionEvent = NULL;
 static jmethodID g_onLoginResult = NULL;
 static jmethodID g_onAwardResult = NULL;
 static jmethodID g_onLog = NULL;
@@ -201,6 +202,89 @@ static void ra_event_handler(const rc_client_event_t *event, rc_client_t *client
 
     ra_log_to_kotlin("event: type=%d", event->type);
 
+    if (g_onCompanionEvent &&
+        event->type >= RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED &&
+        event->type <= RC_CLIENT_EVENT_SUBSET_COMPLETED) {
+        const char *title = "";
+        const char *desc = "";
+        const char *value = "";
+        const char *best_value = "";
+        const char *badge_url = "";
+        int id = 0;
+        int rank = 0;
+        int total_entries = 0;
+        int points = 0;
+
+        if (event->achievement) {
+            id = (int)event->achievement->id;
+            title = event->achievement->title ? event->achievement->title : "";
+            desc = event->achievement->description ? event->achievement->description : "";
+            value = event->achievement->measured_progress;
+            points = (int)event->achievement->points;
+            badge_url = event->achievement->badge_url ? event->achievement->badge_url : "";
+        } else if (event->leaderboard) {
+            id = (int)event->leaderboard->id;
+            title = event->leaderboard->title ? event->leaderboard->title : "";
+            desc = event->leaderboard->description ? event->leaderboard->description : "";
+            value = event->leaderboard->tracker_value ? event->leaderboard->tracker_value : "";
+        } else if (event->leaderboard_tracker) {
+            id = (int)event->leaderboard_tracker->id;
+            value = event->leaderboard_tracker->display;
+        } else if (event->leaderboard_scoreboard) {
+            const rc_client_leaderboard_t *leaderboard =
+                rc_client_get_leaderboard_info(g_client, event->leaderboard_scoreboard->leaderboard_id);
+            id = (int)event->leaderboard_scoreboard->leaderboard_id;
+            if (leaderboard) {
+                title = leaderboard->title ? leaderboard->title : "";
+                desc = leaderboard->description ? leaderboard->description : "";
+            }
+            value = event->leaderboard_scoreboard->submitted_score;
+            best_value = event->leaderboard_scoreboard->best_score;
+            rank = (int)event->leaderboard_scoreboard->new_rank;
+            total_entries = (int)event->leaderboard_scoreboard->num_entries;
+        } else if (event->subset) {
+            id = (int)event->subset->id;
+            title = event->subset->title ? event->subset->title : "";
+            badge_url = event->subset->badge_url ? event->subset->badge_url : "";
+        }
+
+        JNIEnv *companion_env;
+        int companion_attached = 0;
+        if ((*g_jvm)->GetEnv(g_jvm, (void **)&companion_env, JNI_VERSION_1_6) != JNI_OK) {
+            (*g_jvm)->AttachCurrentThread(g_jvm, &companion_env, NULL);
+            companion_attached = 1;
+        }
+
+        jstring jTitle = (*companion_env)->NewStringUTF(companion_env, title);
+        jstring jDesc = (*companion_env)->NewStringUTF(companion_env, desc);
+        jstring jValue = (*companion_env)->NewStringUTF(companion_env, value);
+        jstring jBestValue = (*companion_env)->NewStringUTF(companion_env, best_value);
+        jstring jBadgeUrl = (*companion_env)->NewStringUTF(companion_env, badge_url);
+        if (jTitle && jDesc && jValue && jBestValue && jBadgeUrl) {
+            (*companion_env)->CallVoidMethod(
+                companion_env,
+                g_manager,
+                g_onCompanionEvent,
+                (jint)event->type,
+                (jint)id,
+                jTitle,
+                jDesc,
+                jValue,
+                jBestValue,
+                (jint)rank,
+                (jint)total_entries,
+                (jint)points,
+                jBadgeUrl
+            );
+        }
+        if (jTitle) (*companion_env)->DeleteLocalRef(companion_env, jTitle);
+        if (jDesc) (*companion_env)->DeleteLocalRef(companion_env, jDesc);
+        if (jValue) (*companion_env)->DeleteLocalRef(companion_env, jValue);
+        if (jBestValue) (*companion_env)->DeleteLocalRef(companion_env, jBestValue);
+        if (jBadgeUrl) (*companion_env)->DeleteLocalRef(companion_env, jBadgeUrl);
+        if (companion_attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+    }
+
     if (event->type != RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED &&
         event->type != RC_CLIENT_EVENT_GAME_COMPLETED &&
         event->type != RC_CLIENT_EVENT_DISCONNECTED &&
@@ -279,6 +363,12 @@ Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeInit(JNIEnv *env
     jclass cls = (*env)->GetObjectClass(env, thiz);
     g_onServerCall = (*env)->GetMethodID(env, cls, "onServerCall", "(Ljava/lang/String;Ljava/lang/String;J)V");
     g_onEvent = (*env)->GetMethodID(env, cls, "onAchievementEvent", "(IILjava/lang/String;Ljava/lang/String;I)V");
+    g_onCompanionEvent = (*env)->GetMethodID(
+        env,
+        cls,
+        "onCompanionEvent",
+        "(IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIILjava/lang/String;)V"
+    );
     g_onLoginResult = (*env)->GetMethodID(env, cls, "onLoginResult", "(ZLjava/lang/String;Ljava/lang/String;)V");
     g_onLog = (*env)->GetMethodID(env, cls, "onNativeLog", "(Ljava/lang/String;)V");
     g_onAwardResult = (*env)->GetMethodID(env, cls, "onAwardResult", "(IZ)V");
@@ -818,6 +908,182 @@ Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetAchievementDa
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);
     return result;
+}
+
+static void ra_sanitize_companion_field(char *dest, size_t dest_size, const char *source) {
+    size_t pos = 0;
+    if (!dest || dest_size == 0) return;
+    if (!source) source = "";
+    while (*source && pos + 1 < dest_size) {
+        unsigned char ch = (unsigned char)*source++;
+        if (ch == 0x1e || ch == 0x1f || ch == '\n' || ch == '\r' || ch == '\t')
+            ch = ' ';
+        dest[pos++] = (char)ch;
+    }
+    dest[pos] = '\0';
+}
+
+/*
+ * Returns record-separated achievement facts for the companion:
+ * id, title, description, points, unlocked, measured progress, measured percent,
+ * bucket, rarity, type, badge URL.
+ */
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetCompanionAchievementData(
+        JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_client || !rc_client_is_game_loaded(g_client)) {
+        return (*env)->NewStringUTF(env, "");
+    }
+
+    rc_client_achievement_list_t *list = rc_client_create_achievement_list(
+        g_client,
+        RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE,
+        RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS
+    );
+    if (!list) return (*env)->NewStringUTF(env, "");
+
+    size_t cap = 16384;
+    size_t pos = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        rc_client_destroy_achievement_list(list);
+        return (*env)->NewStringUTF(env, "");
+    }
+    buf[0] = '\0';
+
+    for (uint32_t b = 0; b < list->num_buckets; b++) {
+        const rc_client_achievement_bucket_t *bucket = &list->buckets[b];
+        for (uint32_t a = 0; a < bucket->num_achievements; a++) {
+            const rc_client_achievement_t *ach = bucket->achievements[a];
+            char title[256];
+            char description[768];
+            char progress[64];
+            char badge_url[1024];
+            int softcore;
+            int needed;
+
+            if (!ach || ach->id == 0) continue;
+            softcore = (ach->unlocked & RC_CLIENT_ACHIEVEMENT_UNLOCKED_SOFTCORE) ||
+                       ach->state == RC_CLIENT_ACHIEVEMENT_STATE_UNLOCKED;
+            if (!softcore && (ach->unlocked & RC_CLIENT_ACHIEVEMENT_UNLOCKED_HARDCORE)) continue;
+
+            ra_sanitize_companion_field(title, sizeof(title), ach->title);
+            ra_sanitize_companion_field(description, sizeof(description), ach->description);
+            ra_sanitize_companion_field(progress, sizeof(progress), ach->measured_progress);
+            ra_sanitize_companion_field(badge_url, sizeof(badge_url), ach->badge_url);
+
+            while (pos + 2304 > cap) {
+                size_t new_cap = cap * 2;
+                char *new_buf = (char *)realloc(buf, new_cap);
+                if (!new_buf) {
+                    free(buf);
+                    rc_client_destroy_achievement_list(list);
+                    return (*env)->NewStringUTF(env, "");
+                }
+                buf = new_buf;
+                cap = new_cap;
+            }
+
+            needed = snprintf(
+                buf + pos,
+                cap - pos,
+                "%u\x1f%s\x1f%s\x1f%u\x1f%d\x1f%s\x1f%.2f\x1f%u\x1f%.2f\x1f%u\x1f%s\x1e",
+                ach->id,
+                title,
+                description,
+                ach->points,
+                softcore,
+                progress,
+                ach->measured_percent,
+                bucket->bucket_type,
+                ach->rarity,
+                ach->type,
+                badge_url
+            );
+            if (needed < 0 || (size_t)needed >= cap - pos) {
+                free(buf);
+                rc_client_destroy_achievement_list(list);
+                return (*env)->NewStringUTF(env, "");
+            }
+            pos += (size_t)needed;
+        }
+    }
+
+    if (pos > 0) buf[--pos] = '\0';
+    rc_client_destroy_achievement_list(list);
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetCompanionSummaryData(
+        JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_client || !rc_client_is_game_loaded(g_client)) {
+        return (*env)->NewStringUTF(env, "");
+    }
+    rc_client_user_game_summary_t summary;
+    char buf[128];
+    memset(&summary, 0, sizeof(summary));
+    rc_client_get_user_game_summary(g_client, &summary);
+    snprintf(
+        buf,
+        sizeof(buf),
+        "%u|%u|%u|%u",
+        summary.num_core_achievements,
+        summary.num_unlocked_achievements,
+        summary.points_core,
+        summary.points_unlocked
+    );
+    return (*env)->NewStringUTF(env, buf);
+}
+
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_scorza_libretro_RetroAchievementsManager_nativeGetActiveLeaderboardData(
+        JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (!g_client || !rc_client_is_game_loaded(g_client)) {
+        return (*env)->NewStringUTF(env, "");
+    }
+
+    rc_client_leaderboard_list_t *list = rc_client_create_leaderboard_list(
+        g_client,
+        RC_CLIENT_LEADERBOARD_LIST_GROUPING_TRACKING
+    );
+    if (!list) return (*env)->NewStringUTF(env, "");
+
+    char buf[1536];
+    buf[0] = '\0';
+    for (uint32_t b = 0; b < list->num_buckets && buf[0] == '\0'; b++) {
+        const rc_client_leaderboard_bucket_t *bucket = &list->buckets[b];
+        if (bucket->bucket_type != RC_CLIENT_LEADERBOARD_BUCKET_ACTIVE) continue;
+        for (uint32_t i = 0; i < bucket->num_leaderboards; i++) {
+            const rc_client_leaderboard_t *leaderboard = bucket->leaderboards[i];
+            char title[256];
+            char description[768];
+            char value[64];
+            if (!leaderboard || leaderboard->state != RC_CLIENT_LEADERBOARD_STATE_TRACKING)
+                continue;
+            ra_sanitize_companion_field(title, sizeof(title), leaderboard->title);
+            ra_sanitize_companion_field(description, sizeof(description), leaderboard->description);
+            ra_sanitize_companion_field(value, sizeof(value), leaderboard->tracker_value);
+            snprintf(
+                buf,
+                sizeof(buf),
+                "%u\x1f%s\x1f%s\x1f%s",
+                leaderboard->id,
+                title,
+                description,
+                value
+            );
+            break;
+        }
+    }
+
+    rc_client_destroy_leaderboard_list(list);
+    return (*env)->NewStringUTF(env, buf);
 }
 
 static void ra_award_response(const rc_api_server_response_t *response, void *userdata) {
