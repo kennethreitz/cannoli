@@ -58,14 +58,8 @@ class SettingsRepositoryTest {
         val settings = newRepo()
 
         assertFalse(settings.dualScreenLaunching)
-        assertFalse(settings.topScreenBlackout)
-        assertFalse(settings.dimLauncherDuringGames)
         settings.dualScreenLaunching = true
-        settings.topScreenBlackout = true
-        settings.dimLauncherDuringGames = true
         assertTrue(settings.dualScreenLaunching)
-        assertTrue(settings.topScreenBlackout)
-        assertTrue(settings.dimLauncherDuringGames)
     }
 
     @Test fun `rewind requires an explicit opt in`() {

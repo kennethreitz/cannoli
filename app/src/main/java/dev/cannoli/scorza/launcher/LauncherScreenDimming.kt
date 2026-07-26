@@ -6,15 +6,11 @@ import android.view.WindowManager
 internal const val DIMMED_LAUNCHER_OVERLAY_ALPHA = 0.95f
 
 internal fun shouldDimLauncherScreen(
-    experimentalFeatures: Boolean,
-    dualScreenLaunching: Boolean,
-    dimLauncherDuringGames: Boolean,
+    dualScreenActive: Boolean,
     gameActive: Boolean,
     gameDisplayId: Int?,
     launcherDisplayId: Int,
-): Boolean = experimentalFeatures &&
-    dualScreenLaunching &&
-    dimLauncherDuringGames &&
+): Boolean = dualScreenActive &&
     gameActive &&
     gameDisplayId != null &&
     gameDisplayId != launcherDisplayId

@@ -16,27 +16,11 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class BlackGameScreenTest {
     @Test
-    fun `black game screen is fully opt in and requires separate displays`() {
-        assertTrue(shouldBlankGameScreen(true, true, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldBlankGameScreen(false, true, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldBlankGameScreen(true, false, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldBlankGameScreen(true, true, false, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldBlankGameScreen(true, true, true, gameDisplayId = null, launcherDisplayId = 4))
-        assertFalse(shouldBlankGameScreen(true, true, true, gameDisplayId = 4, launcherDisplayId = 4))
-    }
-
-    @Test
-    fun `default home keeps the game display anchored during boot`() {
-        assertTrue(
-            shouldBlankGameScreen(
-                experimentalFeatures = true,
-                dualScreenLaunching = true,
-                topScreenBlackout = false,
-                cannoliIsDefaultHome = true,
-                gameDisplayId = 0,
-                launcherDisplayId = 4,
-            )
-        )
+    fun `dual screen support always provides a black idle game display`() {
+        assertTrue(shouldBlankGameScreen(true, gameDisplayId = 0, launcherDisplayId = 4))
+        assertFalse(shouldBlankGameScreen(false, gameDisplayId = 0, launcherDisplayId = 4))
+        assertFalse(shouldBlankGameScreen(true, gameDisplayId = null, launcherDisplayId = 4))
+        assertFalse(shouldBlankGameScreen(true, gameDisplayId = 4, launcherDisplayId = 4))
     }
 
     @Test
@@ -48,9 +32,7 @@ class BlackGameScreenTest {
 
         assertTrue(
             shouldBlankGameScreen(
-                experimentalFeatures = true,
-                dualScreenLaunching = true,
-                topScreenBlackout = true,
+                dualScreenActive = true,
                 gameDisplayId = 0,
                 launcherDisplayId = launcherDisplayId,
             )

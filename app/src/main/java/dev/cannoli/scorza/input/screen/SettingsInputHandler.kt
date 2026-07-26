@@ -77,8 +77,6 @@ class SettingsInputHandler @Inject constructor(
             val key = settingsViewModel.getSelectedItem()?.key
             settingsViewModel.cycleSelected(-1, repeatCount = nav.lastKeyRepeatCount)
             if (key == "dual_screen_launching" ||
-                key == "top_screen_blackout" ||
-                key == "dim_launcher_during_games" ||
                 key == "universal_companion_deck" ||
                 key == "experimental_features"
             ) {
@@ -97,8 +95,6 @@ class SettingsInputHandler @Inject constructor(
             val key = settingsViewModel.getSelectedItem()?.key
             settingsViewModel.cycleSelected(1, repeatCount = nav.lastKeyRepeatCount)
             if (key == "dual_screen_launching" ||
-                key == "top_screen_blackout" ||
-                key == "dim_launcher_during_games" ||
                 key == "universal_companion_deck" ||
                 key == "experimental_features"
             ) {

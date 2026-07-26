@@ -15,14 +15,12 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class LauncherScreenDimmingTest {
     @Test
-    fun `launcher dimming is fully opt in and only active during a dual screen game`() {
-        assertTrue(shouldDimLauncherScreen(true, true, true, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(false, true, true, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(true, false, true, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(true, true, false, true, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(true, true, true, false, gameDisplayId = 0, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(true, true, true, true, gameDisplayId = null, launcherDisplayId = 4))
-        assertFalse(shouldDimLauncherScreen(true, true, true, true, gameDisplayId = 4, launcherDisplayId = 4))
+    fun `dual screen support dims the launcher only while a game uses the other display`() {
+        assertTrue(shouldDimLauncherScreen(true, true, gameDisplayId = 0, launcherDisplayId = 4))
+        assertFalse(shouldDimLauncherScreen(false, true, gameDisplayId = 0, launcherDisplayId = 4))
+        assertFalse(shouldDimLauncherScreen(true, false, gameDisplayId = 0, launcherDisplayId = 4))
+        assertFalse(shouldDimLauncherScreen(true, true, gameDisplayId = null, launcherDisplayId = 4))
+        assertFalse(shouldDimLauncherScreen(true, true, gameDisplayId = 4, launcherDisplayId = 4))
     }
 
     @Test

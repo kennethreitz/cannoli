@@ -185,15 +185,10 @@ internal fun launcherRelocationIntent(context: Context): Intent =
     }
 
 internal fun shouldBlankGameScreen(
-    experimentalFeatures: Boolean,
-    dualScreenLaunching: Boolean,
-    topScreenBlackout: Boolean,
-    cannoliIsDefaultHome: Boolean = false,
+    dualScreenActive: Boolean,
     gameDisplayId: Int?,
     launcherDisplayId: Int,
-): Boolean = experimentalFeatures &&
-    dualScreenLaunching &&
-    (topScreenBlackout || cannoliIsDefaultHome) &&
+): Boolean = dualScreenActive &&
     gameDisplayId != null &&
     gameDisplayId != launcherDisplayId
 

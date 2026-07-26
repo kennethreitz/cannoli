@@ -1146,9 +1146,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         val launcherDisplayId = windowManager.defaultDisplay.displayId
         val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
         val dim = shouldDimLauncherScreen(
-            experimentalFeatures = settings.experimentalFeatures,
-            dualScreenLaunching = settings.dualScreenLaunching,
-            dimLauncherDuringGames = settings.dimLauncherDuringGames,
+            dualScreenActive = activityDisplayRouter.isDualScreenActive,
             gameActive = gameActive,
             gameDisplayId = gameDisplayId,
             launcherDisplayId = launcherDisplayId,
@@ -1243,10 +1241,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         )
         val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
         val shouldShow = shouldBlankGameScreen(
-            experimentalFeatures = settings.experimentalFeatures,
-            dualScreenLaunching = settings.dualScreenLaunching,
-            topScreenBlackout = settings.topScreenBlackout,
-            cannoliIsDefaultHome = isCannoliDefaultHome(),
+            dualScreenActive = activityDisplayRouter.isDualScreenActive,
             gameDisplayId = gameDisplayId,
             launcherDisplayId = launcherDisplayId,
         )

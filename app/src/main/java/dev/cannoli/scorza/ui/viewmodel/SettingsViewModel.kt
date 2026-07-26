@@ -230,8 +230,6 @@ class SettingsViewModel @Inject constructor(
         val colorStatusBar: String,
         val swapPlayResume: Boolean,
         val dualScreenLaunching: Boolean,
-        val topScreenBlackout: Boolean,
-        val dimLauncherDuringGames: Boolean,
         val universalCompanionDeck: Boolean,
         val showWifi: Boolean,
         val showBluetooth: Boolean,
@@ -469,20 +467,6 @@ class SettingsViewModel @Inject constructor(
                     settings.dualScreenLaunching = !settings.dualScreenLaunching
                 }
             }
-            "top_screen_blackout" -> {
-                if (settings.dualScreenLaunching &&
-                    (activityDisplayRouter.isDualScreenAvailable || settings.topScreenBlackout)
-                ) {
-                    settings.topScreenBlackout = !settings.topScreenBlackout
-                }
-            }
-            "dim_launcher_during_games" -> {
-                if (settings.dualScreenLaunching &&
-                    (activityDisplayRouter.isDualScreenAvailable || settings.dimLauncherDuringGames)
-                ) {
-                    settings.dimLauncherDuringGames = !settings.dimLauncherDuringGames
-                }
-            }
             "content_mode" -> {
                 val entries = ContentMode.entries
                 val cur = entries.indexOf(settings.contentMode).coerceAtLeast(0)
@@ -693,8 +677,6 @@ class SettingsViewModel @Inject constructor(
         colorStatusBar = settings.colorStatusBar,
         swapPlayResume = settings.swapPlayResume,
         dualScreenLaunching = settings.dualScreenLaunching,
-        topScreenBlackout = settings.topScreenBlackout,
-        dimLauncherDuringGames = settings.dimLauncherDuringGames,
         universalCompanionDeck = settings.universalCompanionDeck,
         showWifi = settings.showWifi,
         showBluetooth = settings.showBluetooth,
@@ -735,8 +717,6 @@ class SettingsViewModel @Inject constructor(
         settings.colorStatusBar = snap.colorStatusBar
         settings.swapPlayResume = snap.swapPlayResume
         settings.dualScreenLaunching = snap.dualScreenLaunching
-        settings.topScreenBlackout = snap.topScreenBlackout
-        settings.dimLauncherDuringGames = snap.dimLauncherDuringGames
         settings.universalCompanionDeck = snap.universalCompanionDeck
         settings.showWifi = snap.showWifi
         settings.showBluetooth = snap.showBluetooth
@@ -931,31 +911,17 @@ class SettingsViewModel @Inject constructor(
                     valueRes = onOff(settings.rewindEnabled),
                 ))
                 add(SettingsItem(
-                    "universal_companion_deck",
-                    R.string.setting_universal_companion_deck,
-                    valueRes = onOff(settings.universalCompanionDeck),
-                    disabled = !settings.dualScreenLaunching ||
-                        (!activityDisplayRouter.isDualScreenAvailable && !settings.universalCompanionDeck),
-                ))
-                add(SettingsItem(
                     "dual_screen_launching",
                     R.string.setting_dual_screen_launching,
                     valueRes = onOff(settings.dualScreenLaunching),
                     disabled = !activityDisplayRouter.isDualScreenAvailable && !settings.dualScreenLaunching,
                 ))
                 add(SettingsItem(
-                    "top_screen_blackout",
-                    R.string.setting_top_screen_blackout,
-                    valueRes = onOff(settings.topScreenBlackout),
+                    "universal_companion_deck",
+                    R.string.setting_universal_companion_deck,
+                    valueRes = onOff(settings.universalCompanionDeck),
                     disabled = !settings.dualScreenLaunching ||
-                        (!activityDisplayRouter.isDualScreenAvailable && !settings.topScreenBlackout),
-                ))
-                add(SettingsItem(
-                    "dim_launcher_during_games",
-                    R.string.setting_dim_launcher_during_games,
-                    valueRes = onOff(settings.dimLauncherDuringGames),
-                    disabled = !settings.dualScreenLaunching ||
-                        (!activityDisplayRouter.isDualScreenAvailable && !settings.dimLauncherDuringGames),
+                        (!activityDisplayRouter.isDualScreenAvailable && !settings.universalCompanionDeck),
                 ))
             }
             add(SettingsItem(
