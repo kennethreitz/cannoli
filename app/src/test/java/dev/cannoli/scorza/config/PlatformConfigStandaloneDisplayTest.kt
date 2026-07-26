@@ -23,12 +23,12 @@ class PlatformConfigStandaloneDisplayTest {
     @Test fun `standalone selection renders app name not bundled core`() {
         val pc = config()
         pc.setAppMapping("NES", "com.explusalpha.NesEmu")
-        // Simulate RetroArch installed with nestopia_libretro so coreStatus returns "Present",
+        // Simulate RetroArch installed with the bundled NES core so coreStatus returns "Present",
         // which is the scenario where the bug manifests (core branch fires instead of standalone).
-        val installedRaCores = mapOf("org.libretro.retroarch" to setOf("nestopia_libretro"))
+        val installedRaCores = mapOf("org.libretro.retroarch" to setOf("fceumm_libretro"))
         val entry = pc.getDetailedMappings(installedRaCores = installedRaCores).first { it.tag == "NES" }
         assertEquals("Standalone", entry.runnerLabel)
-        assertTrue(entry.coreDisplayName != pc.getCoreDisplayName("nestopia_libretro"))
+        assertTrue(entry.coreDisplayName != pc.getCoreDisplayName("fceumm_libretro"))
     }
 
     @Test fun `RomM identity follows selected Citra MMJ app instead of bundled core`() {
@@ -50,15 +50,15 @@ class PlatformConfigStandaloneDisplayTest {
         val pc = config()
         // No installedRaCores and no unresponsive packages: coreStatus is "Missing" (confirmed absent).
         val entry = pc.getDetailedMappings().first { it.tag == "NES" }
-        assertEquals(pc.getCoreDisplayName("nestopia_libretro"), entry.coreDisplayName)
+        assertEquals(pc.getCoreDisplayName("fceumm_libretro"), entry.coreDisplayName)
         assertEquals(EmulatorMappingStatus.NOT_INSTALLED, entry.status)
     }
 
     @Test fun `a mapped core that is installed is READY`() {
         val pc = config()
-        val installedRaCores = mapOf("org.libretro.retroarch" to setOf("nestopia_libretro"))
+        val installedRaCores = mapOf("org.libretro.retroarch" to setOf("fceumm_libretro"))
         val entry = pc.getDetailedMappings(installedRaCores = installedRaCores).first { it.tag == "NES" }
-        assertEquals(pc.getCoreDisplayName("nestopia_libretro"), entry.coreDisplayName)
+        assertEquals(pc.getCoreDisplayName("fceumm_libretro"), entry.coreDisplayName)
         assertEquals(EmulatorMappingStatus.READY, entry.status)
     }
 
@@ -67,7 +67,7 @@ class PlatformConfigStandaloneDisplayTest {
         // RA present but cannot report its cores (unresponsive): coreStatus "Unknown" -> show as picked.
         val entry = pc.getDetailedMappings(unresponsivePackages = setOf("org.libretro.retroarch"))
             .first { it.tag == "NES" }
-        assertEquals(pc.getCoreDisplayName("nestopia_libretro"), entry.coreDisplayName)
+        assertEquals(pc.getCoreDisplayName("fceumm_libretro"), entry.coreDisplayName)
         assertEquals(EmulatorMappingStatus.READY, entry.status)
     }
 

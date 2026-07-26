@@ -17,6 +17,13 @@ class PlatformsJsonAssetTest {
         check(pc.getAllTags().isNotEmpty())
     }
 
+    @Test fun `NES defaults to the memory-map aware FCEUmm core`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val pc = PlatformConfig(File(ctx.cacheDir, "nes-core-root"), ctx.assets)
+
+        assertEquals("fceumm_libretro", pc.getCoreMapping("NES"))
+    }
+
     @Test fun `Citra MMJ uses its exported game path launch contract`() {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         val pc = PlatformConfig(File(ctx.cacheDir, "citra-mmj-root"), ctx.assets)
