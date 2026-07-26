@@ -1,6 +1,7 @@
 package dev.cannoli.scorza.launcher
 
 import dev.cannoli.scorza.libretro.AriaOfSorrowMapSnapshot
+import dev.cannoli.scorza.libretro.MetroidGbaMapSnapshot
 import dev.cannoli.scorza.libretro.PokemonFireEmeraldSnapshot
 import dev.cannoli.scorza.libretro.SotnMapSnapshot
 import dev.cannoli.scorza.libretro.SuperMarioWorldSnapshot
@@ -27,6 +28,9 @@ class LaunchState @Inject constructor() {
     private val _ariaOfSorrowMap = MutableStateFlow<AriaOfSorrowMapSnapshot?>(null)
     val ariaOfSorrowMap: StateFlow<AriaOfSorrowMapSnapshot?> = _ariaOfSorrowMap
 
+    private val _metroidGbaMap = MutableStateFlow<MetroidGbaMapSnapshot?>(null)
+    val metroidGbaMap: StateFlow<MetroidGbaMapSnapshot?> = _metroidGbaMap
+
     private val _pokemonFireEmerald = MutableStateFlow<PokemonFireEmeraldSnapshot?>(null)
     val pokemonFireEmerald: StateFlow<PokemonFireEmeraldSnapshot?> = _pokemonFireEmerald
 
@@ -39,6 +43,7 @@ class LaunchState @Inject constructor() {
     fun markGameStarted() {
         _sotnMap.value = null
         _ariaOfSorrowMap.value = null
+        _metroidGbaMap.value = null
         _pokemonFireEmerald.value = null
         _superMarioWorld.value = null
         _universalCompanion.value = null
@@ -51,6 +56,7 @@ class LaunchState @Inject constructor() {
         gameStartedAtMillis = null
         _sotnMap.value = null
         _ariaOfSorrowMap.value = null
+        _metroidGbaMap.value = null
         _pokemonFireEmerald.value = null
         _superMarioWorld.value = null
         _universalCompanion.value = null
@@ -62,6 +68,10 @@ class LaunchState @Inject constructor() {
 
     fun updateAriaOfSorrowMap(snapshot: AriaOfSorrowMapSnapshot) {
         _ariaOfSorrowMap.value = snapshot
+    }
+
+    fun updateMetroidGbaMap(snapshot: MetroidGbaMapSnapshot) {
+        _metroidGbaMap.value = snapshot
     }
 
     fun updatePokemonFireEmerald(snapshot: PokemonFireEmeraldSnapshot) {

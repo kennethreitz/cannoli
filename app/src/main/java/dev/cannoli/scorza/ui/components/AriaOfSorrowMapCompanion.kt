@@ -227,14 +227,22 @@ private fun DrawScope.drawAriaCastleMap(
         val visited = snapshot.isVisited(cell.x, cell.y)
         val left = origin.x + (cell.x - minX) * tileSize
         val top = origin.y + (cell.y - minY) * tileSize
-        val fill = if (visited) AriaExploredRoom else AriaBlueprintRoom
+        val fill = when {
+            visited && cell.saveRoom -> AriaSaveRoom
+            visited -> AriaExploredRoom
+            else -> AriaBlueprintRoom
+        }
         drawRect(
             color = fill,
             topLeft = Offset(left, top),
             size = Size(tileSize, tileSize),
         )
 
-        val outline = if (visited) AriaExploredOutline else AriaBlueprintOutline
+        val outline = when {
+            visited && cell.saveRoom -> AriaSaveRoomOutline
+            visited -> AriaExploredOutline
+            else -> AriaBlueprintOutline
+        }
         val strokeWidth = max(1f, tileSize * 0.08f)
         fun sharesRoom(x: Int, y: Int): Boolean {
             if (x to y !in displayedCoordinates) return false
@@ -264,23 +272,15 @@ private fun DrawScope.drawAriaCastleMap(
             drawLine(outline, Offset(left, top), Offset(left, top + tileSize), strokeWidth)
         }
 
-        if (visited && (cell.saveRoom || cell.warpRoom)) {
+        if (visited && cell.warpRoom) {
             val symbolRadius = max(1.2f, tileSize * 0.18f)
             val center = Offset(left + tileSize / 2f, top + tileSize / 2f)
-            if (cell.warpRoom) {
-                drawCircle(
-                    color = AriaRoomSymbol,
-                    radius = symbolRadius,
-                    center = center,
-                    style = Stroke(width = max(1f, tileSize * 0.08f)),
-                )
-            } else {
-                drawRect(
-                    color = AriaRoomSymbol,
-                    topLeft = Offset(center.x - symbolRadius, center.y - symbolRadius),
-                    size = Size(symbolRadius * 2, symbolRadius * 2),
-                )
-            }
+            drawCircle(
+                color = AriaRoomSymbol,
+                radius = symbolRadius,
+                center = center,
+                style = Stroke(width = max(1f, tileSize * 0.08f)),
+            )
         }
     }
 
@@ -310,6 +310,8 @@ private fun DrawScope.drawAriaCastleMap(
 private val AriaBackground = Color.Black
 private val AriaExploredRoom = Color(0xFF3E8ED0)
 private val AriaExploredOutline = Color(0xFFB9E4FF)
+private val AriaSaveRoom = Color(0xFFB83242)
+private val AriaSaveRoomOutline = Color(0xFFFFB3BC)
 private val AriaBlueprintRoom = Color(0xFF0D2438)
 private val AriaBlueprintOutline = Color(0xFF28567B)
 private val AriaRoomSymbol = Color(0xFFDBF1FF)

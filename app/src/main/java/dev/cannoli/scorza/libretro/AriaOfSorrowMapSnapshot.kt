@@ -45,8 +45,8 @@ class AriaMapLayout internal constructor(
         const val HEIGHT = 35
         const val BYTE_SIZE = WIDTH * HEIGHT * Short.SIZE_BYTES
         const val EMPTY_CELL = 0xFFFF
-        private const val SAVE_ROOM_FLAG = 0x4000
-        private const val WARP_ROOM_FLAG = 0x8000
+        private const val SAVE_ROOM_FLAG = 0x8000
+        private const val WARP_ROOM_FLAG = 0x4000
         val X_TILES = 0 until WIDTH
         val Y_TILES = 0 until HEIGHT
 
@@ -170,7 +170,7 @@ internal object AriaOfSorrowMapReader {
     private const val EWRAM_START = 0x02000000
     private const val EWRAM_END = 0x02040000
     private const val GAME_MODE_ADDRESS = 0x02000010
-    private const val GAME_MODE_IN_GAME = 4
+    private const val IN_GAME_SUBMODE_ADDRESS = 0x02000064
     private const val MAP_POSITION_ADDRESS = 0x0200008C
     private const val CURRENT_AREA_ADDRESS = 0x0200009E
     private const val MAP_STATE_ADDRESS = 0x020000B4
@@ -203,7 +203,8 @@ internal object AriaOfSorrowMapReader {
     ): AriaOfSorrowMapSnapshot? {
         val layout = layoutForRom(romPath) ?: return null
         val gameMode = copyMemory(GAME_MODE_ADDRESS, 1)?.u8(0) ?: return null
-        if (gameMode != GAME_MODE_IN_GAME) return null
+        val inGameSubmode = copyMemory(IN_GAME_SUBMODE_ADDRESS, 1)?.u8(0) ?: return null
+        if (!isStableAriaGameplay(gameMode, inGameSubmode)) return null
 
         val packedMapPosition = copyMemory(MAP_POSITION_ADDRESS, Short.SIZE_BYTES)
             ?.u16(0)
@@ -280,6 +281,13 @@ internal object AriaOfSorrowMapReader {
         return layout
     }
 }
+
+private const val ARIA_GAME_MODE_IN_GAME = 4
+private const val ARIA_IN_GAME_SUBMODE_PLAYING = 1
+
+internal fun isStableAriaGameplay(gameMode: Int, inGameSubmode: Int): Boolean =
+    gameMode == ARIA_GAME_MODE_IN_GAME &&
+        inGameSubmode == ARIA_IN_GAME_SUBMODE_PLAYING
 
 private fun ByteArray.u8(offset: Int): Int = this[offset].toInt() and 0xFF
 

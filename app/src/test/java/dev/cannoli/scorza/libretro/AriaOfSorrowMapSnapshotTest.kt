@@ -29,6 +29,25 @@ class AriaOfSorrowMapSnapshotTest {
         assertFalse(snapshot.isVisited(32, 12))
     }
 
+    @Test fun `map layout decodes save and warp room flags in game order`() {
+        val layout = layoutOf(
+            mapCell(10, 10, area = 0, flags = 0x8000),
+            mapCell(11, 10, area = 0, flags = 0x4000),
+        )
+
+        assertTrue(layout.cellAt(10, 10)!!.saveRoom)
+        assertFalse(layout.cellAt(10, 10)!!.warpRoom)
+        assertFalse(layout.cellAt(11, 10)!!.saveRoom)
+        assertTrue(layout.cellAt(11, 10)!!.warpRoom)
+    }
+
+    @Test fun `room transitions hold the last stable marker snapshot`() {
+        assertTrue(isStableAriaGameplay(gameMode = 4, inGameSubmode = 1))
+        assertFalse(isStableAriaGameplay(gameMode = 4, inGameSubmode = 3))
+        assertFalse(isStableAriaGameplay(gameMode = 4, inGameSubmode = 5))
+        assertFalse(isStableAriaGameplay(gameMode = 2, inGameSubmode = 1))
+    }
+
     @Test fun `purchased maps reveal only their blue castle regions`() {
         val layout = layoutOf(
             mapCell(3, 4, area = 0),
@@ -103,7 +122,8 @@ class AriaOfSorrowMapSnapshotTest {
         y: Int,
         area: Int,
         room: Int = 0,
-    ): Pair<Pair<Int, Int>, Int> = (x to y) to ((area shl 6) or room)
+        flags: Int = 0,
+    ): Pair<Pair<Int, Int>, Int> = (x to y) to (flags or (area shl 6) or room)
 
     private fun reveal(mapState: ByteArray, x: Int, y: Int) {
         val bank = x shr 5
