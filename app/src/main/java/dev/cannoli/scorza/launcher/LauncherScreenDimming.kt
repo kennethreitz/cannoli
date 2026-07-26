@@ -1,0 +1,31 @@
+package dev.cannoli.scorza.launcher
+
+import android.view.Window
+import android.view.WindowManager
+
+internal const val DIMMED_LAUNCHER_OVERLAY_ALPHA = 0.95f
+
+internal fun shouldDimLauncherScreen(
+    dualScreenActive: Boolean,
+    gameActive: Boolean,
+    gameDisplayId: Int?,
+    launcherDisplayId: Int,
+): Boolean = dualScreenActive &&
+    gameActive &&
+    gameDisplayId != null &&
+    gameDisplayId != launcherDisplayId
+
+internal fun launcherDimOverlayAlpha(dimmed: Boolean): Float =
+    if (dimmed) DIMMED_LAUNCHER_OVERLAY_ALPHA else 0f
+
+/**
+ * Keep the dimmed launcher touchable so it can consume taps without exposing Android's
+ * secondary-display launcher, but prevent those taps from taking key focus from the game.
+ */
+internal fun setLauncherWindowInputBlocked(window: Window, blocked: Boolean) {
+    if (blocked) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+    } else {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+    }
+}

@@ -63,11 +63,34 @@
         <activity
             android:name=".libretro.LibretroActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|navigation|touchscreen"
-            android:theme="@style/Theme.Cannoli"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="${applicationId}.game"
+            android:theme="@style/Theme.Cannoli.GameSession"
             android:immersive="true"
             android:resizeableActivity="false"
             android:preferMinimalPostProcessing="true"
             android:windowLayoutInDisplayCutoutMode="shortEdges" />
+
+        <activity
+            android:name=".launcher.ExternalGameSessionActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|navigation|touchscreen"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:taskAffinity="${applicationId}.external_game_session"
+            android:theme="@style/Theme.Cannoli.GameSession" />
+
+        <activity
+            android:name=".launcher.BlackGameScreenActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|navigation|touchscreen"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:taskAffinity="${applicationId}.black_game_screen"
+            android:theme="@style/Theme.Cannoli.GameSession" />
 
         <provider
             android:name=".launcher.CannoliFileProvider"
