@@ -97,6 +97,11 @@ data class RomsPageDto(
 )
 
 @Serializable
+data class RommUploadStartDto(
+    @SerialName("upload_id") val uploadId: String,
+)
+
+@Serializable
 data class FirmwareDto(
     val id: Int,
     @SerialName("file_name") val fileName: String,

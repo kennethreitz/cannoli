@@ -114,7 +114,8 @@ fun DialogOverlay(
                             isSelected = isSelected,
                             fontSize = listFontSize,
                             lineHeight = listLineHeight,
-                            verticalPadding = listVerticalPadding
+                            verticalPadding = listVerticalPadding,
+                            enabled = !dev.cannoli.scorza.input.isDisabledMenuOption(option),
                         )
                     } else {
                         PillRowText(
@@ -447,6 +448,7 @@ fun DialogOverlay(
                 dialogState.citraAvailable,
                 dialogState.cemuAvailable,
                 dialogState.vita3kAvailable,
+                dialogState.dolphinAvailable,
             )
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
             val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
@@ -561,6 +563,17 @@ fun DialogOverlay(
                             lineHeight = listLineHeight,
                             verticalPadding = listVerticalPadding,
                         )
+                        RommSaveSyncRow.DOLPHIN -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_dolphin_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.dolphinLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
                     }
                 }
             }
@@ -576,6 +589,46 @@ fun DialogOverlay(
             ConfirmOverlay(
                 message = stringResource(message),
                 buttonStyle = buttonStyle
+            )
+        }
+
+        is DialogState.RommUploadConfirm -> {
+            ConfirmOverlay(
+                message = stringResource(
+                    R.string.romm_upload_confirm,
+                    dialogState.fileName,
+                    dialogState.sizeLabel,
+                ),
+                buttonStyle = buttonStyle,
+            )
+        }
+
+        is DialogState.RommUploadProgress -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                dev.cannoli.scorza.ui.screens.HousekeepingScreen(
+                    kind = dev.cannoli.scorza.ui.screens.HousekeepingKind.ROMM_UPLOAD,
+                    progress = dialogState.progress,
+                    statusLabel = stringResource(
+                        R.string.romm_upload_status,
+                        dialogState.fileName,
+                        (dialogState.progress * 100f).toInt().coerceIn(0, 100),
+                    ),
+                )
+                BottomBar(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(screenPadding),
+                    leftItems = listOf(buttonStyle.back to stringResource(R.string.label_cancel)),
+                    rightItems = emptyList(),
+                )
+            }
+        }
+
+        is DialogState.RommUploadResult -> {
+            MessageOverlay(
+                message = dialogState.message,
+                buttonStyle = buttonStyle,
+                buttonLabel = stringResource(R.string.label_back),
             )
         }
 
@@ -1223,7 +1276,7 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, DOLPHIN, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
         fun visibleRows(
             supported: Boolean,
@@ -1234,6 +1287,7 @@ enum class RommSaveSyncRow {
             citraAvailable: Boolean = false,
             cemuAvailable: Boolean = false,
             vita3kAvailable: Boolean = false,
+            dolphinAvailable: Boolean = false,
         ): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
@@ -1243,6 +1297,7 @@ enum class RommSaveSyncRow {
                     if (citraAvailable) add(CITRA)
                     if (cemuAvailable) add(CEMU)
                     if (vita3kAvailable) add(VITA3K)
+                    if (dolphinAvailable) add(DOLPHIN)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)
                     if (syncErrors > 0) add(ERRORS)

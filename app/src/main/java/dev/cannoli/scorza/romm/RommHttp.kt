@@ -16,6 +16,8 @@ class RommHttp(
     private var builtWithSelfSigned: Boolean = false
     private var cachedDownload: OkHttpClient? = null
     private var downloadBase: OkHttpClient? = null
+    private var cachedUpload: OkHttpClient? = null
+    private var uploadBase: OkHttpClient? = null
 
     @Synchronized
     fun client(): OkHttpClient {
@@ -40,6 +42,22 @@ class RommHttp(
             .build()
         cachedDownload = built
         downloadBase = base
+        return built
+    }
+
+    // RomM 5 uploads ROMs in 10 MB chunks. Give each chunk the same two-minute write window as
+    // RomM's web client, and allow the server extra time to assemble the completed file.
+    @Synchronized
+    fun uploadClient(): OkHttpClient {
+        val base = client()
+        val existing = cachedUpload
+        if (existing != null && uploadBase === base) return existing
+        val built = base.newBuilder()
+            .readTimeout(UPLOAD_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .writeTimeout(UPLOAD_WRITE_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+            .build()
+        cachedUpload = built
+        uploadBase = base
         return built
     }
 
@@ -96,5 +114,7 @@ class RommHttp(
 
     companion object {
         private const val DOWNLOAD_READ_TIMEOUT_MINUTES = 10L
+        private const val UPLOAD_READ_TIMEOUT_MINUTES = 10L
+        private const val UPLOAD_WRITE_TIMEOUT_MINUTES = 2L
     }
 }

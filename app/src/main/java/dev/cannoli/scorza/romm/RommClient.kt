@@ -19,11 +19,14 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.BufferedSink
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 
 class RommException(val statusCode: Int?, message: String, cause: Throwable? = null) :
     Exception(message, cause)
@@ -34,6 +37,7 @@ class RommClient(
     private val baseUrlProvider: () -> String,
     private val clientProvider: () -> OkHttpClient,
     private val downloadClientProvider: () -> OkHttpClient = clientProvider,
+    private val uploadClientProvider: () -> OkHttpClient = downloadClientProvider,
 ) {
     private val jsonMedia = "application/json".toMediaType()
 
@@ -281,6 +285,54 @@ class RommClient(
         }
     }
 
+    fun startRomUpload(
+        platformId: Int,
+        fileName: String,
+        totalSize: Long,
+        totalChunks: Int,
+    ): String {
+        val request = Request.Builder()
+            .url(endpoint("/api/roms/upload/start"))
+            .header("X-Upload-Platform", platformId.toString())
+            .header("X-Upload-Filename", fileName)
+            .header("X-Upload-Total-Size", totalSize.toString())
+            .header("X-Upload-Total-Chunks", totalChunks.toString())
+            .post(ByteArray(0).toRequestBody(null))
+            .build()
+        return execute(request, RommUploadStartDto.serializer()).uploadId
+    }
+
+    fun uploadRomChunk(
+        uploadId: String,
+        chunkIndex: Int,
+        file: File,
+        offset: Long,
+        length: Long,
+    ) {
+        val request = Request.Builder()
+            .url(endpoint("/api/roms/upload/$uploadId"))
+            .header("X-Chunk-Index", chunkIndex.toString())
+            .put(FileSliceRequestBody(file, offset, length))
+            .build()
+        executeNoBody(request, uploadClientProvider())
+    }
+
+    fun completeRomUpload(uploadId: String) {
+        val request = Request.Builder()
+            .url(endpoint("/api/roms/upload/$uploadId/complete"))
+            .post(ByteArray(0).toRequestBody(null))
+            .build()
+        executeNoBody(request, uploadClientProvider())
+    }
+
+    fun cancelRomUpload(uploadId: String) {
+        val request = Request.Builder()
+            .url(endpoint("/api/roms/upload/$uploadId/cancel"))
+            .post(ByteArray(0).toRequestBody(null))
+            .build()
+        executeNoBody(request, uploadClientProvider())
+    }
+
     fun registerDevice(payload: DeviceRegisterPayload): DeviceRegisterResponse {
         val body = rommJson.encodeToString(DeviceRegisterPayload.serializer(), payload)
             .toRequestBody(jsonMedia)
@@ -430,6 +482,43 @@ class RommClient(
                 rommJson.decodeFromString(deserializer, text)
             } catch (e: SerializationException) {
                 throw RommException(it.code, "Parse error: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun executeNoBody(request: Request, client: OkHttpClient = clientProvider()) {
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: IOException) {
+            throw RommException(null, "Network error: ${e.message}", e)
+        }
+        response.use {
+            val text = it.body?.string().orEmpty()
+            if (!it.isSuccessful) {
+                throw RommException(it.code, "HTTP ${it.code} ${it.message}: ${text.take(200)}".trim())
+            }
+        }
+    }
+}
+
+private class FileSliceRequestBody(
+    private val file: File,
+    private val offset: Long,
+    private val length: Long,
+) : RequestBody() {
+    override fun contentType() = "application/octet-stream".toMediaType()
+    override fun contentLength(): Long = length
+
+    override fun writeTo(sink: BufferedSink) {
+        RandomAccessFile(file, "r").use { input ->
+            input.seek(offset)
+            var remaining = length
+            val buffer = ByteArray(64 * 1024)
+            while (remaining > 0) {
+                val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (read < 0) throw IOException("Unexpected end of file while uploading ${file.name}")
+                sink.write(buffer, 0, read)
+                remaining -= read
             }
         }
     }

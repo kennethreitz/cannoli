@@ -269,6 +269,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 vita3kLinked = standaloneSaveBridge.isLinked(
                     dev.cannoli.scorza.romm.sync.StandaloneSaveKind.VITA3K,
                 ),
+                dolphinLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN,
+                ),
             )
         }
         if (linked) syncScheduler.syncNow()

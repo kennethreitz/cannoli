@@ -62,4 +62,44 @@ class StandaloneTitleIdParserTest {
         val launcher = tmp.newFile("Broken.psvita").apply { writeText("undertale") }
         assertNull(StandaloneTitleIdParser.vita3kTitleId(launcher))
     }
+
+    @Test fun `reads Dolphin game id from an ISO disc header`() {
+        val iso = tmp.newFile("game.iso").apply {
+            writeBytes("GZLE01-disc-data".toByteArray())
+        }
+        assertEquals("GZLE01", StandaloneTitleIdParser.dolphinGameId(iso))
+    }
+
+    @Test fun `reads Dolphin game id from an RVZ embedded disc header`() {
+        val rvz = tmp.newFile("game.rvz")
+        RandomAccessFile(rvz, "rw").use { raf ->
+            raf.setLength(0x100)
+            raf.seek(0)
+            raf.write(byteArrayOf('R'.code.toByte(), 'V'.code.toByte(), 'Z'.code.toByte(), 1))
+            raf.seek(0x58)
+            raf.write("GALE01".toByteArray())
+        }
+        assertEquals("GALE01", StandaloneTitleIdParser.dolphinGameId(rvz))
+    }
+
+    @Test fun `reads Dolphin game id from a WBFS disc-info header`() {
+        val wbfs = tmp.newFile("game.wbfs")
+        RandomAccessFile(wbfs, "rw").use { raf ->
+            raf.setLength(0x400)
+            raf.seek(0)
+            raf.write("WBFS".toByteArray())
+            raf.seek(8)
+            raf.write(9)
+            raf.seek(0x200)
+            raf.write("RMGE01".toByteArray())
+        }
+        assertEquals("RMGE01", StandaloneTitleIdParser.dolphinGameId(wbfs))
+    }
+
+    @Test fun `reads game id from a Dolphin GCI save header`() {
+        val gci = tmp.newFile("save.gci").apply {
+            writeBytes("GZLE01-save-data".toByteArray())
+        }
+        assertEquals("GZLE01", StandaloneTitleIdParser.dolphinGciGameId(gci))
+    }
 }

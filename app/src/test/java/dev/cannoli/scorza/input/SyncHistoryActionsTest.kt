@@ -35,7 +35,7 @@ class SyncHistoryActionsTest {
     )
 
     @Test
-    fun `confirm on save state history launches resume`() {
+    fun `confirm on old save state history does not launch when state sync is disabled`() {
         val nav = NavigationController()
         val settings = mockk<SettingsRepository>(relaxed = true)
         val roms = mockk<RomsRepository>(relaxed = true)
@@ -52,23 +52,34 @@ class SyncHistoryActionsTest {
             launcherActions = launcherActions,
         ).onConfirm()
 
-        verify(exactly = 1) { launcherActions.launchSelected(ListItem.RomItem(rom), true) }
-        verify(exactly = 1) {
-            launcherActions.recordRecentlyPlayedByPath(rom.path.absolutePath)
-        }
+        verify(exactly = 0) { launcherActions.launchSelected(any(), any()) }
+        verify(exactly = 0) { launcherActions.recordRecentlyPlayedByPath(any()) }
     }
 
     @Test
-    fun `confirm on ordinary save history does not launch`() {
+    fun `confirm on successful ordinary save history launches the game normally`() {
         val nav = NavigationController()
+        val settings = mockk<SettingsRepository>(relaxed = true)
+        val roms = mockk<RomsRepository>(relaxed = true)
         val launcherActions = mockk<LauncherActions>(relaxed = true)
+        every { settings.romDirectory } returns "/roms"
+        every { roms.gameByPath(rom.path.absolutePath) } returns rom
+        every { launcherActions.launchSelected(ListItem.RomItem(rom), false) } returns null
         nav.dialogState.value = DialogState.SyncHistory(
             listOf(saveStateRow().copy(name = "Castlevania - Aria of Sorrow", isSaveState = false)),
         )
 
-        handler(nav = nav, launcherActions = launcherActions).onConfirm()
+        handler(
+            nav = nav,
+            settings = settings,
+            roms = roms,
+            launcherActions = launcherActions,
+        ).onConfirm()
 
-        verify(exactly = 0) { launcherActions.launchSelected(any(), any()) }
+        verify(exactly = 1) { launcherActions.launchSelected(ListItem.RomItem(rom), false) }
+        verify(exactly = 1) {
+            launcherActions.recordRecentlyPlayedByPath(rom.path.absolutePath)
+        }
     }
 
     @Test
@@ -139,5 +150,6 @@ class SyncHistoryActionsTest {
         standaloneSaveBridge = mockk(relaxed = true),
         osdController = mockk(relaxed = true),
         rommDevicePairing = mockk(relaxed = true),
+        rommRomUploader = mockk(relaxed = true),
     )
 }

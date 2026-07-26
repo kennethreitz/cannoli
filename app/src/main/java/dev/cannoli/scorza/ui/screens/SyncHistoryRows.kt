@@ -13,7 +13,8 @@ data class SyncHistoryRow(
     val isSaveState: Boolean = false,
 ) {
     val canPlay: Boolean
-        get() = isSaveState && (direction == SyncDirection.UPLOAD || direction == SyncDirection.DOWNLOAD)
+        get() = !isSaveState &&
+            (direction == SyncDirection.UPLOAD || direction == SyncDirection.DOWNLOAD)
 }
 
 fun buildHistoryRows(entries: List<SyncHistoryEntry>, now: Long, nowLabel: String): List<SyncHistoryRow> =

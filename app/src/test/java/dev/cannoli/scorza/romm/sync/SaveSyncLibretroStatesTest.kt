@@ -14,6 +14,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -31,14 +32,11 @@ class SaveSyncLibretroStatesTest {
 
     private lateinit var service: SaveSyncService
     private lateinit var client: RommClient
-    private lateinit var store: SaveSyncStore
     private lateinit var stateSlot: String
-    private lateinit var sd: File
-    private lateinit var bridge: LibretroStateBridge
     private lateinit var stateFile: File
 
     @Before fun setup() {
-        sd = tmp.newFolder("SD")
+        val sd = tmp.newFolder("SD")
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val settings = SettingsRepository(context).apply {
             sdCardRoot = sd.absolutePath
@@ -51,16 +49,19 @@ class SaveSyncLibretroStatesTest {
             parentFile?.mkdirs()
             writeText("ROM")
         }
-        File(sd, "Save States/SNES/Zelda").apply { mkdirs() }
-        stateFile = File(sd, "Save States/SNES/Zelda/Zelda.state.auto").apply { writeText("STATE") }
-        File(sd, "Save States/SNES/Zelda/Zelda.state.auto.png").writeText("THUMB")
+        File(sd, "Save States/SNES/Zelda").mkdirs()
+        stateFile = File(sd, "Save States/SNES/Zelda/Zelda.state.auto").apply {
+            writeText("LOCAL-STATE")
+        }
 
-        val platformConfig = PlatformConfig(sd, context.assets)
-        bridge = LibretroStateBridge(paths, platformConfig, LaunchState())
+        val bridge = LibretroStateBridge(
+            paths,
+            PlatformConfig(sd, context.assets),
+            LaunchState(),
+        )
         stateSlot = bridge.slot(gameKey)
 
         val db = CannoliDatabase(paths)
-        store = SaveSyncStore(db)
         val links = RommLinkRepository(db) { paths.romDir }
         links.upsertLink(42, gameKey, "download")
         val connStore = mockk<RommConnectionStore>(relaxed = true)
@@ -77,7 +78,7 @@ class SaveSyncLibretroStatesTest {
             connStore,
             settings,
             registrar,
-            store,
+            SaveSyncStore(db),
             resolver,
             links,
             paths,
@@ -93,172 +94,43 @@ class SaveSyncLibretroStatesTest {
         )
     }
 
-    @Test fun `sweep uploads save states through the native RomM states API`() = runBlocking {
-        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1)
-        every { client.getStates(42) } returns emptyList()
-        every {
-            client.uploadState(42, "Snes9x", any())
-        } returns RommStateDto(
-            id = 99,
-            romId = 42,
-            fileName = "Zelda.cannoli-8d94d9927fb3.statebundle",
-            updatedAt = "2026-07-25T12:00:00Z",
+    @Test fun `save states are not offered for download`() = runBlocking {
+        assertTrue(stateSlot.startsWith(LibretroStateBridge.STATE_SLOT_PREFIX))
+        assertFalse(service.canDownloadSaveStates("SNES/Zelda.sfc"))
+
+        val result = service.downloadLatestSaveState(
+            tag = "SNES",
+            base = "Zelda",
+            gameKey = "SNES/Zelda.sfc",
+            emulator = "Snes9x",
         )
 
-        val summary = service.sweep { Triple("SNES", "Zelda", "Snes9x") }
-
-        assertTrue(stateSlot.startsWith(LibretroStateBridge.STATE_SLOT_PREFIX))
-        assertEquals(1, summary.uploaded)
-        assertEquals(99, store.get("SNES/Zelda.sfc", stateSlot)?.rommSaveId)
-        verify(exactly = 1) {
-            client.uploadState(42, "Snes9x", match { it.name.endsWith(".statebundle") })
-        }
-        verify(exactly = 0) { client.uploadSave(42, "Snes9x", stateSlot, any(), any(), any()) }
+        assertFalse(result.success)
+        assertEquals("Save-state sync is disabled", result.message)
+        verify(exactly = 0) { client.getStates(any()) }
+        verify(exactly = 0) { client.downloadStateContent(any(), any()) }
     }
 
-    @Test fun `launch automatically adopts a newer compatible raw RomM state`() = runBlocking {
-        every { client.getStates(42) } returns listOf(
-            RommStateDto(
-                id = 6,
-                romId = 42,
-                fileName = "Zelda [2099-01-01 00-00-00].state",
-                updatedAt = "2099-01-01T00:00:00Z",
-                emulator = "snes9x",
-            ),
-        )
-        every { client.downloadStateContent(6, any()) } answers {
-            secondArg<File>().writeText("SERVER-STATE")
-        }
-        every { client.uploadState(42, "Snes9x", any()) } returns RommStateDto(
-            id = 100,
-            romId = 42,
-            fileName = "Zelda.cannoli-8d94d9927fb3.statebundle",
-            updatedAt = "2099-01-01T00:00:01Z",
-        )
+    @Test fun `prelaunch sync ignores server save states`() = runBlocking {
         every { client.getSaves(42, "dev-1") } returns emptyList()
 
         val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
 
         assertTrue(outcome is PreLaunchOutcome.Proceed)
-        assertEquals(
-            "SERVER-STATE",
-            File(sd, "Save States/SNES/Zelda/Zelda.state").readText(),
-        )
-        verify(exactly = 1) { client.downloadStateContent(6, any()) }
-        verify(exactly = 1) {
-            client.uploadState(42, "Snes9x", match { it.name.endsWith(".statebundle") })
-        }
+        assertEquals("LOCAL-STATE", stateFile.readText())
+        verify(exactly = 0) { client.getStates(any()) }
+        verify(exactly = 0) { client.downloadStateContent(any(), any()) }
+        verify(exactly = 0) { client.uploadState(any(), any(), any()) }
     }
 
-    @Test fun `legacy migration skips a corrupted newer row and adopts the newest valid archive`() = runBlocking {
-        stateFile.writeText("SERVER-LEGACY")
-        val legacyArchive = tmp.newFile("legacy-state.zip")
-        bridge.refreshArchive("SNES", "Zelda", "SNES/Zelda.sfc")!!.files.single()
-            .copyTo(legacyArchive, overwrite = true)
-        stateFile.writeText("LOCAL-OLDER")
-        stateFile.setLastModified(1_000L)
+    @Test fun `sweep never uploads libretro save states`() = runBlocking {
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(sessionId = 1)
 
-        every { client.getStates(42) } returns emptyList()
-        every { client.getSaves(42, "dev-1") } returns listOf(
-            RommSaveDto(
-                id = 197,
-                slot = stateSlot,
-                contentHash = SaveHasher.md5Hex("NOT-A-ZIP".toByteArray()),
-                updatedAt = "2099-01-01T00:00:01Z",
-            ),
-            RommSaveDto(
-                id = 165,
-                slot = stateSlot,
-                contentHash = SaveHasher.hashFile(legacyArchive),
-                updatedAt = "2099-01-01T00:00:00Z",
-            ),
-        )
-        every { client.downloadSaveContent(any(), "dev-1", any()) } answers {
-            val saveId = firstArg<Int>()
-            val destination = thirdArg<File>()
-            if (saveId == 197) destination.writeText("NOT-A-ZIP")
-            else legacyArchive.copyTo(destination, overwrite = true)
-        }
-        every { client.uploadState(42, "Snes9x", any()) } returns RommStateDto(
-            id = 101,
-            romId = 42,
-            fileName = "Zelda.cannoli-8d94d9927fb3.statebundle",
-            updatedAt = "2099-01-01T00:00:02Z",
-        )
+        val summary = service.sweep { Triple("SNES", "Zelda", "Snes9x") }
 
-        val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
-
-        assertTrue(outcome is PreLaunchOutcome.Proceed)
-        assertEquals("SERVER-LEGACY", stateFile.readText())
-        verify(exactly = 1) { client.downloadSaveContent(197, "dev-1", any()) }
-        verify(exactly = 1) { client.downloadSaveContent(165, "dev-1", any()) }
-        verify(exactly = 1) { client.deleteSaves(listOf(197, 165)) }
-    }
-
-    @Test fun `confirmed native state retires only its managed legacy save rows`() = runBlocking {
-        val local = bridge.refreshArchive("SNES", "Zelda", "SNES/Zelda.sfc")!!
-        val updatedAt = "2026-07-25T12:00:00Z"
-        store.upsert(
-            SaveSyncRow(
-                gameKey = "SNES/Zelda.sfc",
-                slot = stateSlot,
-                rommRomId = 42,
-                rommSaveId = 99,
-                lastSyncedAt = updatedAt,
-                lastUploadedHash = local.contentHash,
-                localContentHash = local.contentHash,
-                serverUpdatedAt = updatedAt,
-                updatedAt = System.currentTimeMillis(),
-            ),
-        )
-        every { client.getStates(42) } returns listOf(
-            RommStateDto(
-                id = 99,
-                romId = 42,
-                fileName = local.uploadFileName,
-                updatedAt = updatedAt,
-            ),
-        )
-        every { client.getSaves(42, "dev-1") } returnsMany listOf(
-            listOf(
-                RommSaveDto(id = 158, slot = stateSlot),
-                RommSaveDto(id = 159, slot = "autosave"),
-                RommSaveDto(id = 160, slot = "${LibretroStateBridge.STATE_SLOT_PREFIX}another-core"),
-            ),
-            emptyList(),
-        )
-
-        val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
-
-        assertTrue(outcome is PreLaunchOutcome.Proceed)
-        verify(exactly = 1) { client.deleteSaves(listOf(158)) }
-        verify(exactly = 0) { client.deleteSaves(match { 159 in it || 160 in it }) }
-    }
-
-    @Test fun `failed legacy migration keeps the legacy save row`() = runBlocking {
-        val legacyArchive = tmp.newFile("failed-legacy-state.zip")
-        bridge.refreshArchive("SNES", "Zelda", "SNES/Zelda.sfc")!!.files.single()
-            .copyTo(legacyArchive, overwrite = true)
-        stateFile.setLastModified(1_000L)
-
-        every { client.getStates(42) } returns emptyList()
-        every { client.getSaves(42, "dev-1") } returns listOf(
-            RommSaveDto(
-                id = 158,
-                slot = stateSlot,
-                contentHash = SaveHasher.hashFile(legacyArchive),
-                updatedAt = "2099-01-01T00:00:00Z",
-            ),
-        )
-        every { client.downloadSaveContent(158, "dev-1", any()) } answers {
-            legacyArchive.copyTo(thirdArg(), overwrite = true)
-        }
-        every { client.uploadState(42, "Snes9x", any()) } throws
-            IllegalStateException("server rejected state")
-
-        val outcome = service.syncBeforeLaunch("SNES", "Zelda", "SNES/Zelda.sfc", "Snes9x")
-
-        assertTrue(outcome is PreLaunchOutcome.Proceed)
-        verify(exactly = 0) { client.deleteSaves(any()) }
+        assertEquals(0, summary.uploaded)
+        assertEquals("LOCAL-STATE", stateFile.readText())
+        verify(exactly = 0) { client.getStates(any()) }
+        verify(exactly = 0) { client.uploadState(any(), any(), any()) }
     }
 }

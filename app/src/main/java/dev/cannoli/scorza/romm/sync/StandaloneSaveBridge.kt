@@ -97,8 +97,12 @@ class StandaloneSaveBridge @Inject constructor(
         gameKey: String,
         base: String,
     ): StandaloneMirrorResult {
+        val tag = gameKey.substringBefore('/')
+        if (kind == StandaloneSaveKind.DOLPHIN) {
+            return refreshDolphinMirror(gameKey, tag, base)
+        }
         directFileRoot(kind)?.let { fileRoot ->
-            return refreshFileMirror(kind, gameKey, base, fileRoot)
+            return refreshFileMirror(kind, gameKey, tag, base, fileRoot)
         }
         val tree = treeUri(kind)
             ?: return StandaloneMirrorResult.Unavailable("${kind.emulatorName} save folder is not connected")
@@ -112,7 +116,7 @@ class StandaloneSaveBridge @Inject constructor(
                     "standalone ${kind.emulatorName} save missing [$base]: title=$titleId " +
                         "root=${docs.root.displayName} children=${docs.children(docs.root).joinToString { it.displayName }}",
                 )
-                standaloneArchive(kind.platformTag, base).delete()
+                standaloneArchive(tag, base).delete()
                 return StandaloneMirrorResult.Missing
             }
             val files = docs.walkFiles(saveRoot)
@@ -120,10 +124,10 @@ class StandaloneSaveBridge @Inject constructor(
                 dev.cannoli.scorza.util.RommLog.write(
                     "standalone ${kind.emulatorName} save empty [$base]: title=$titleId root=${saveRoot.displayName}",
                 )
-                standaloneArchive(kind.platformTag, base).delete()
+                standaloneArchive(tag, base).delete()
                 return StandaloneMirrorResult.Missing
             }
-            val archive = standaloneArchive(kind.platformTag, base)
+            val archive = standaloneArchive(tag, base)
             val archiveDir = requireNotNull(archive.parentFile).apply { mkdirs() }
             val temp = File.createTempFile("standalone-save", ".zip", archiveDir)
             try {
@@ -147,6 +151,10 @@ class StandaloneSaveBridge @Inject constructor(
         gameKey: String,
         archive: File,
     ) {
+        if (kind == StandaloneSaveKind.DOLPHIN) {
+            applyDolphinMirror(gameKey, archive)
+            return
+        }
         directFileRoot(kind)?.let { fileRoot ->
             applyFileMirror(kind, gameKey, archive, fileRoot)
             return
@@ -190,6 +198,7 @@ class StandaloneSaveBridge @Inject constructor(
     private fun refreshFileMirror(
         kind: StandaloneSaveKind,
         gameKey: String,
+        tag: String,
         base: String,
         fileRoot: File,
     ): StandaloneMirrorResult {
@@ -203,10 +212,10 @@ class StandaloneSaveBridge @Inject constructor(
                 dev.cannoli.scorza.util.RommLog.write(
                     "standalone ${kind.emulatorName} save missing [$base]: title=$titleId root=${fileRoot.path}",
                 )
-                standaloneArchive(kind.platformTag, base).delete()
+                standaloneArchive(tag, base).delete()
                 StandaloneMirrorResult.Missing
             } else {
-                val archive = standaloneArchive(kind.platformTag, base)
+                val archive = standaloneArchive(tag, base)
                 val archiveDir = requireNotNull(archive.parentFile).apply { mkdirs() }
                 val temp = File.createTempFile("standalone-save", ".zip", archiveDir)
                 try {
@@ -276,6 +285,10 @@ class StandaloneSaveBridge @Inject constructor(
         when (kind) {
             StandaloneSaveKind.VITA3K ->
                 docs.findPath(docs.root, listOf("ux0", "user", "00", "savedata")) != null
+            StandaloneSaveKind.DOLPHIN ->
+                docs.findPath(docs.root, listOf("Config")) != null &&
+                    (docs.findPath(docs.root, listOf("GC")) != null ||
+                        docs.findPath(docs.root, listOf("Wii")) != null)
             else -> true
         }
     }.getOrDefault(false)
@@ -319,6 +332,7 @@ class StandaloneSaveBridge @Inject constructor(
             docs.root,
             listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
         )
+        StandaloneSaveKind.DOLPHIN -> error("Dolphin saves use per-game file filtering")
     }
 
     private fun createSaveRoot(
@@ -343,7 +357,177 @@ class StandaloneSaveBridge @Inject constructor(
             docs.root,
             listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
         )
+        StandaloneSaveKind.DOLPHIN -> error("Dolphin saves use per-game file filtering")
     }
+
+    private fun refreshDolphinMirror(
+        gameKey: String,
+        tag: String,
+        base: String,
+    ): StandaloneMirrorResult {
+        val kind = StandaloneSaveKind.DOLPHIN
+        val tree = treeUri(kind)
+            ?: return StandaloneMirrorResult.Unavailable("Dolphin save folder is not connected")
+        val rom = File(romDir, gameKey)
+        val titleId = StandaloneTitleIdParser.dolphinGameId(rom)
+            ?: return StandaloneMirrorResult.Unavailable("could not read Dolphin game ID from ${rom.name}")
+        return try {
+            val docs = DocumentTree(resolver, tree)
+            val files = dolphinSaveFiles(docs, tag, titleId)
+            if (files.isEmpty()) {
+                dev.cannoli.scorza.util.RommLog.write(
+                    "standalone Dolphin save missing [$base]: title=$titleId platform=$tag",
+                )
+                standaloneArchive(tag, base).delete()
+                StandaloneMirrorResult.Missing
+            } else {
+                val archive = standaloneArchive(tag, base)
+                val archiveDir = requireNotNull(archive.parentFile).apply { mkdirs() }
+                val temp = File.createTempFile("dolphin-save", ".zip", archiveDir)
+                try {
+                    writeArchive(docs, kind, titleId, files, temp)
+                    if (!archive.isFile || SaveHasher.hashFile(archive) != SaveHasher.hashFile(temp)) {
+                        replaceFile(temp, archive)
+                        val newest = files.maxOfOrNull { it.node.lastModified } ?: 0L
+                        archive.setLastModified(if (newest > 0L) newest else System.currentTimeMillis())
+                    }
+                } finally {
+                    temp.delete()
+                }
+                StandaloneMirrorResult.Ready(archive)
+            }
+        } catch (t: Throwable) {
+            StandaloneMirrorResult.Unavailable(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    private fun applyDolphinMirror(gameKey: String, archive: File) {
+        val kind = StandaloneSaveKind.DOLPHIN
+        val tree = treeUri(kind)
+            ?: throw IllegalStateException("Dolphin save folder is not connected")
+        val tag = gameKey.substringBefore('/')
+        val rom = File(romDir, gameKey)
+        val titleId = StandaloneTitleIdParser.dolphinGameId(rom)
+            ?: throw IllegalStateException("could not read Dolphin game ID from ${rom.name}")
+        val stage = createStageDirectory()
+        try {
+            extractAndValidate(archive, stage, kind, titleId)
+            validateDolphinStage(stage, tag, titleId)
+            val docs = DocumentTree(resolver, tree)
+            reconcileDolphin(docs, stage, tag, titleId)
+        } finally {
+            stage.deleteRecursively()
+        }
+    }
+
+    private fun dolphinSaveFiles(
+        docs: DocumentTree,
+        tag: String,
+        titleId: String,
+    ): List<DocumentFileEntry> {
+        if (tag.equals("GC", ignoreCase = true)) {
+            val gc = docs.findPath(docs.root, listOf("GC")) ?: return emptyList()
+            return buildList {
+                for (region in docs.children(gc).filter { it.isDirectory }) {
+                    for (card in docs.children(region).filter {
+                        it.isDirectory && it.displayName.startsWith("Card ", ignoreCase = true)
+                    }) {
+                        for (file in docs.children(card).filter { !it.isDirectory }) {
+                            if (!file.displayName.endsWith(".gci", ignoreCase = true)) continue
+                            if (!dolphinGciMatches(docs, file, titleId)) continue
+                            add(
+                                DocumentFileEntry(
+                                    node = file,
+                                    relativePath = "GC/${region.displayName}/${card.displayName}/${file.displayName}",
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (tag.equals("WII", ignoreCase = true)) {
+            val titleHex = dolphinWiiTitleHex(titleId)
+            val data = docs.findPath(
+                docs.root,
+                listOf("Wii", "title", "00010000", titleHex, "data"),
+            ) ?: return emptyList()
+            return docs.walkFiles(data).map {
+                it.copy(relativePath = "Wii/title/00010000/$titleHex/data/${it.relativePath}")
+            }
+        }
+        return emptyList()
+    }
+
+    private fun dolphinGciMatches(
+        docs: DocumentTree,
+        file: DocumentNode,
+        titleId: String,
+    ): Boolean = runCatching {
+        val header = ByteArray(DOLPHIN_GAME_ID_LENGTH)
+        docs.openInput(file).use { input ->
+            var offset = 0
+            while (offset < header.size) {
+                val count = input.read(header, offset, header.size - offset)
+                if (count < 0) return@runCatching false
+                offset += count
+            }
+        }
+        header.toString(Charsets.US_ASCII).equals(titleId, ignoreCase = true)
+    }.getOrDefault(false)
+
+    private fun validateDolphinStage(stage: File, tag: String, titleId: String) {
+        val files = stage.walkTopDown().filter { it.isFile }.toList()
+        check(files.isNotEmpty()) { "Dolphin save archive is empty" }
+        if (tag.equals("GC", ignoreCase = true)) {
+            for (file in files) {
+                val relative = file.relativeTo(stage).invariantSeparatorsPath
+                val parts = relative.split('/')
+                check(
+                    parts.size == 4 &&
+                        parts[0] == "GC" &&
+                        parts[2].startsWith("Card ") &&
+                        file.extension.equals("gci", ignoreCase = true) &&
+                        StandaloneTitleIdParser.dolphinGciGameId(file)
+                            ?.equals(titleId, ignoreCase = true) == true,
+                ) { "Dolphin archive contains a save for a different GameCube game" }
+            }
+            return
+        }
+        check(tag.equals("WII", ignoreCase = true)) { "unsupported Dolphin platform" }
+        val expectedPrefix = "Wii/title/00010000/${dolphinWiiTitleHex(titleId)}/data/"
+        check(files.all {
+            it.relativeTo(stage).invariantSeparatorsPath.startsWith(expectedPrefix)
+        }) { "Dolphin archive contains a save for a different Wii game" }
+    }
+
+    private fun reconcileDolphin(
+        docs: DocumentTree,
+        stage: File,
+        tag: String,
+        titleId: String,
+    ) {
+        val incoming = stage.walkTopDown()
+            .filter { it.isFile }
+            .associateBy { it.relativeTo(stage).invariantSeparatorsPath }
+        val existing = dolphinSaveFiles(docs, tag, titleId)
+            .associateBy { it.relativePath }
+
+        for ((relative, source) in incoming.toSortedMap()) {
+            val parts = relative.split('/')
+            check(parts.size >= 2) { "invalid Dolphin save path" }
+            val parent = docs.ensurePath(docs.root, parts.dropLast(1))
+            val target = docs.child(parent, parts.last()) ?: docs.createFile(parent, parts.last())
+            docs.openOutput(target).use { out -> source.inputStream().use { it.copyTo(out) } }
+        }
+
+        // Only remove stale files that belong to this game. Other games in the same memory-card
+        // directory and the rest of the emulated Wii NAND are deliberately untouched.
+        existing.filterKeys { it !in incoming }.values.forEach { docs.delete(it.node) }
+    }
+
+    private fun dolphinWiiTitleHex(titleId: String): String =
+        titleId.take(4).toByteArray(Charsets.US_ASCII).joinToString("") { "%02x".format(it) }
 
     private fun writeArchive(
         docs: DocumentTree,
@@ -552,6 +736,7 @@ class StandaloneSaveBridge @Inject constructor(
         const val MAX_ARCHIVE_BYTES = 1024L * 1024L * 1024L
         const val VITA3K_PUBLIC_ROOT = "/storage/emulated/0/Vita3K/vita"
         const val VITA3K_SAVEDATA_PATH = "ux0/user/00/savedata"
+        const val DOLPHIN_GAME_ID_LENGTH = 6
     }
 }
 

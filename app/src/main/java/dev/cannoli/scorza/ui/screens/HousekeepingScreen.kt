@@ -30,6 +30,7 @@ enum class HousekeepingKind(@StringRes val titleRes: Int, @StringRes val subtitl
     DATABASE_MIGRATION(R.string.housekeeping_db_title, R.string.housekeeping_db_subtitle),
     INITIAL_SCAN(R.string.housekeeping_initial_title),
     LIBRARY_REFRESH(R.string.housekeeping_refresh_title),
+    ROMM_UPLOAD(R.string.romm_upload_title),
 }
 
 @Composable
