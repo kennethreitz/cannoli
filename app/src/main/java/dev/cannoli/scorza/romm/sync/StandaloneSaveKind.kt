@@ -1,7 +1,7 @@
 package dev.cannoli.scorza.romm.sync
 
 enum class StandaloneSaveKind(
-    val platformTag: String,
+    val platformTags: Set<String>,
     val emulatorName: String,
     val packageName: String,
     val documentAuthority: String,
@@ -9,30 +9,38 @@ enum class StandaloneSaveKind(
     val initialDocumentId: String? = null,
 ) {
     CITRA_MMJ(
-        platformTag = "3DS",
+        platformTags = setOf("3DS"),
         emulatorName = "Citra MMJ",
         packageName = "org.citra.emu",
         documentAuthority = "org.citra.emu.userpathprovider",
     ),
     CEMU(
-        platformTag = "WIIU",
+        platformTags = setOf("WIIU"),
         emulatorName = "Cemu",
         packageName = "info.cemu.cemu",
         documentAuthority = "info.cemu.cemu.provider",
     ),
     VITA3K(
-        platformTag = "PSVITA",
+        platformTags = setOf("PSVITA"),
         emulatorName = "Vita3K",
         packageName = "org.vita3k.emulator",
         documentAuthority = "com.android.externalstorage.documents",
         providerRootId = null,
         initialDocumentId = "primary:Vita3K/vita",
+    ),
+    DOLPHIN(
+        platformTags = setOf("GC", "WII"),
+        emulatorName = "Dolphin",
+        packageName = "org.dolphinemu.dolphinemu",
+        documentAuthority = "org.dolphinemu.dolphinemu.user",
     );
+
+    val platformTag: String get() = platformTags.first()
 
     companion object {
         fun forGame(platformTag: String, emulator: String?): StandaloneSaveKind? =
             entries.firstOrNull {
-                it.platformTag.equals(platformTag, ignoreCase = true) &&
+                it.platformTags.any { tag -> tag.equals(platformTag, ignoreCase = true) } &&
                     it.emulatorName.equals(emulator, ignoreCase = true)
             }
 

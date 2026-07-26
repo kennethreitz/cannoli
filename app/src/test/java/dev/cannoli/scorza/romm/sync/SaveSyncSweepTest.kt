@@ -196,6 +196,33 @@ class SaveSyncSweepTest {
         assertEquals(0, summary.uploaded)
     }
 
+    @Test fun `sweep ignores timestamp-only upload when local and server match their anchors`() = runBlocking {
+        writeSave("LOCAL")
+        val localHash = SaveHasher.hashFile(File(sd, "Saves/SNES/Zelda.srm"))
+        seedAnchor(lastUploadedHash = "server-archive-hash", localContentHash = localHash)
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(
+            sessionId = 1,
+            operations = listOf(
+                SyncOperationDto(
+                    action = "upload",
+                    romId = 42,
+                    saveId = 100,
+                    fileName = "Zelda.zip",
+                    slot = "autosave",
+                    serverContentHash = "server-archive-hash",
+                    reason = "Client save is newer than last sync",
+                ),
+            ),
+            totalUpload = 1,
+        )
+
+        val summary = service.sweep(resolveGame = { Triple("SNES", "Zelda", "snes9x") })
+
+        assertEquals(0, summary.uploaded)
+        assertEquals(0, historyStore.recent().size)
+        verify(exactly = 0) { client.uploadSave(any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test fun `sweep negotiates with current local hash instead of previous anchor`() = runBlocking {
         writeSave("NEW-LOCAL")
         seedAnchor(lastUploadedHash = "previous-server-hash", localContentHash = "previous-local-hash")

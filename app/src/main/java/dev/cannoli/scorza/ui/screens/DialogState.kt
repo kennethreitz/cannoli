@@ -164,8 +164,25 @@ sealed interface DialogState {
         val cemuLinked: Boolean = false,
         val vita3kAvailable: Boolean = false,
         val vita3kLinked: Boolean = false,
+        val dolphinAvailable: Boolean = false,
+        val dolphinLinked: Boolean = false,
     ) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null, val fromQuickMenu: Boolean = false) : DialogState
+    data class RommUploadConfirm(
+        val gameName: String,
+        val fileName: String,
+        val sizeLabel: String,
+    ) : DialogState
+    data class RommUploadProgress(
+        val gameName: String,
+        val fileName: String,
+        val progress: Float = 0f,
+    ) : DialogState
+    data class RommUploadResult(
+        val success: Boolean,
+        val message: String,
+        val returnToContextMenu: Boolean,
+    ) : DialogState
     data class RommPlatformToggle(val items: List<RommPlatformToggleItem>, val selectedIndex: Int = 0) : DialogState
     data class RommCollectionToggle(val items: List<RommCollectionToggleItem>, val selectedIndex: Int = 0) : DialogState
     data class SyncHistory(

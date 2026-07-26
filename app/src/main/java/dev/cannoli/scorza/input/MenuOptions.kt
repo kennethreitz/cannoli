@@ -20,3 +20,23 @@ internal const val MENU_RESTORE_BACKUP = "Restore from Backup"
 internal const val MENU_ROMM_SAVES = "RomM Saves"
 internal const val MENU_DOWNLOAD_LATEST_STATE = "Download Latest Save State"
 internal const val MENU_GUIDES = "Guides"
+internal const val MENU_UPLOAD_TO_ROMM = "Upload to RomM"
+internal const val MENU_UPLOAD_ALREADY_PRESENT = "$MENU_UPLOAD_TO_ROMM\tAlready present"
+
+internal fun MutableList<String>.addRommUploadOption(
+    availability: dev.cannoli.scorza.romm.upload.RommRomUploadAvailability,
+) {
+    val option = when (availability) {
+        dev.cannoli.scorza.romm.upload.RommRomUploadAvailability.AVAILABLE -> MENU_UPLOAD_TO_ROMM
+        dev.cannoli.scorza.romm.upload.RommRomUploadAvailability.ALREADY_PRESENT ->
+            MENU_UPLOAD_ALREADY_PRESENT
+        dev.cannoli.scorza.romm.upload.RommRomUploadAvailability.HIDDEN -> return
+    }
+    if (any { it == MENU_UPLOAD_TO_ROMM || it == MENU_UPLOAD_ALREADY_PRESENT }) return
+    val renameIndex = indexOf(MENU_RENAME)
+    if (renameIndex >= 0) add(renameIndex, option)
+    else add(option)
+}
+
+internal fun isDisabledMenuOption(option: String): Boolean =
+    option == MENU_UPLOAD_ALREADY_PRESENT

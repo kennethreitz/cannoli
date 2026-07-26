@@ -124,6 +124,38 @@ class SaveSyncServicePreLaunchTest {
         assertTrue(service.syncBeforeLaunch("SNES", "Mario", "SNES/Mario.sfc", "snes9x") is PreLaunchOutcome.Proceed)
     }
 
+    @Test fun timestamp_only_upload_verdict_does_not_reupload_unchanged_content() = runTest {
+        writeSave()
+        val localHash = SaveHasher.hashFile(File(sd, "Saves/SNES/Mario.srm"))
+        seedAnchor(lastUploadedHash = "server-archive-hash", localContentHash = localHash)
+        every { client.negotiateSync(any()) } returns SyncNegotiateResponse(
+            sessionId = 1,
+            operations = listOf(
+                SyncOperationDto(
+                    action = "upload",
+                    romId = 42,
+                    saveId = 100,
+                    fileName = "Mario.zip",
+                    slot = "autosave",
+                    serverContentHash = "server-archive-hash",
+                    reason = "Client save is newer than last sync",
+                ),
+            ),
+            totalUpload = 1,
+        )
+
+        val outcome = service.syncBeforeLaunch("SNES", "Mario", "SNES/Mario.sfc", "snes9x")
+
+        assertTrue(outcome is PreLaunchOutcome.Proceed)
+        verify(exactly = 0) { client.uploadSave(any(), any(), any(), any(), any(), any()) }
+        verify {
+            client.completeSyncSession(
+                1,
+                match { it.operationsCompleted == 1 && it.operationsFailed == 0 },
+            )
+        }
+    }
+
     @Test fun negotiate_sends_current_local_hash_not_previous_anchor() = runTest {
         writeSave()
         seedAnchor(lastUploadedHash = "previous-server-hash", localContentHash = "previous-local-hash")

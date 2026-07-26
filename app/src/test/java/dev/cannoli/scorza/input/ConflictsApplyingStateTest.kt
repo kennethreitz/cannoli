@@ -71,6 +71,7 @@ class ConflictsApplyingStateTest {
             standaloneSaveBridge = mockk(relaxed = true),
             osdController = mockk(relaxed = true),
             rommDevicePairing = mockk(relaxed = true),
+            rommRomUploader = mockk(relaxed = true),
         )
     }
 

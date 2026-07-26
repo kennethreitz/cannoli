@@ -25,6 +25,7 @@ import dev.cannoli.scorza.romm.cache.RommSyncCoordinator
 import dev.cannoli.scorza.romm.download.RommDownloadQueue
 import dev.cannoli.scorza.romm.download.RommDownloader
 import dev.cannoli.scorza.romm.download.RommInstaller
+import dev.cannoli.scorza.romm.upload.RommRomUploader
 import dev.cannoli.scorza.romm.sync.DeviceRegistrar
 import dev.cannoli.scorza.romm.sync.LocalSaveResolver
 import dev.cannoli.scorza.romm.sync.PendingConflictStore
@@ -60,6 +61,7 @@ object RommModule {
             baseUrlProvider = { store.host },
             clientProvider = { http.client() },
             downloadClientProvider = { http.downloadClient() },
+            uploadClientProvider = { http.uploadClient() },
         )
 
     @Provides @Singleton
@@ -156,6 +158,7 @@ object RommModule {
         standalone: dev.cannoli.scorza.romm.sync.StandaloneSaveBridge,
         libretroStates: dev.cannoli.scorza.romm.sync.LibretroStateBridge,
         retroArch: dev.cannoli.scorza.romm.sync.RetroArchSaveBridge,
+        melonDs: dev.cannoli.scorza.romm.sync.MelonDsSaveBridge,
     ): SaveSyncService = SaveSyncService(
         client,
         connStore,
@@ -175,6 +178,7 @@ object RommModule {
         standalone,
         libretroStates,
         retroArch,
+        melonDs,
     )
 
     @Provides @Singleton
@@ -195,6 +199,21 @@ object RommModule {
     @Provides @Singleton
     fun provideRommLibrary(db: RommDatabase): RommLibrary =
         CachedRommLibrary(db)
+
+    @Provides @Singleton
+    fun provideRommRomUploader(
+        client: RommClient,
+        store: RommConnectionStore,
+        matcher: dev.cannoli.scorza.romm.sync.RommCacheMatcher,
+        platformMap: PlatformMap,
+        syncCoordinator: RommSyncCoordinator,
+    ): RommRomUploader = RommRomUploader(
+        client = client,
+        connection = store,
+        matcher = matcher,
+        platformMap = platformMap,
+        syncCoordinator = syncCoordinator,
+    )
 
     @Provides @Singleton
     fun provideRommBrowseViewModel(

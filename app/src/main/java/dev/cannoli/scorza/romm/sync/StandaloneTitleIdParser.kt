@@ -15,6 +15,7 @@ object StandaloneTitleIdParser {
         StandaloneSaveKind.CITRA_MMJ -> citraTitleId(rom)
         StandaloneSaveKind.CEMU -> cemuTitleId(rom)
         StandaloneSaveKind.VITA3K -> vita3kTitleId(rom)
+        StandaloneSaveKind.DOLPHIN -> dolphinGameId(rom)
     }
 
     fun citraTitleId(rom: File): String? = runCatching {
@@ -65,5 +66,59 @@ object StandaloneTitleIdParser {
         }
     }.getOrNull()
 
+    fun dolphinGameId(rom: File): String? = runCatching {
+        RandomAccessFile(rom, "r").use { raf ->
+            val offset = when {
+                rom.extension.equals("rvz", ignoreCase = true) ||
+                    rom.extension.equals("wia", ignoreCase = true) -> {
+                    val magic = ByteArray(4).also {
+                        raf.seek(0L)
+                        raf.readFully(it)
+                    }
+                    if (!magic.contentEquals(byteArrayOf('R'.code.toByte(), 'V'.code.toByte(), 'Z'.code.toByte(), 1)) &&
+                        !magic.contentEquals(byteArrayOf('W'.code.toByte(), 'I'.code.toByte(), 'A'.code.toByte(), 1))
+                    ) return null
+                    WIA_DISC_HEADER_OFFSET
+                }
+                rom.extension.equals("wbfs", ignoreCase = true) -> {
+                    val magic = ByteArray(4).also {
+                        raf.seek(0L)
+                        raf.readFully(it)
+                    }
+                    if (!magic.contentEquals("WBFS".toByteArray(Charsets.US_ASCII))) return null
+                    raf.seek(WBFS_HD_SECTOR_SHIFT_OFFSET)
+                    val shift = raf.readUnsignedByte()
+                    if (shift !in 9..30) return null
+                    1L shl shift
+                }
+                else -> 0L
+            }
+            if (raf.length() < offset + DOLPHIN_GAME_ID_LENGTH) return null
+            raf.seek(offset)
+            val id = ByteArray(DOLPHIN_GAME_ID_LENGTH).also(raf::readFully)
+                .toString(Charsets.US_ASCII)
+                .uppercase()
+            id.takeIf(DOLPHIN_GAME_ID::matches)
+        }
+    }.getOrNull()
+
+    fun dolphinGciGameId(save: File): String? = runCatching {
+        if (!save.isFile || save.length() < DOLPHIN_GAME_ID_LENGTH) return null
+        save.inputStream().use { input ->
+            val id = ByteArray(DOLPHIN_GAME_ID_LENGTH)
+            var offset = 0
+            while (offset < id.size) {
+                val count = input.read(id, offset, id.size - offset)
+                if (count < 0) return null
+                offset += count
+            }
+            id.toString(Charsets.US_ASCII).uppercase().takeIf(DOLPHIN_GAME_ID::matches)
+        }
+    }.getOrNull()
+
     private val VITA_TITLE_ID = Regex("""[A-Za-z]{4}[0-9]{5}""")
+    private val DOLPHIN_GAME_ID = Regex("""[A-Z0-9]{6}""")
+    private const val DOLPHIN_GAME_ID_LENGTH = 6
+    private const val WIA_DISC_HEADER_OFFSET = 0x58L
+    private const val WBFS_HD_SECTOR_SHIFT_OFFSET = 8L
 }

@@ -18,11 +18,20 @@ class StandaloneSaveKindTest {
             StandaloneSaveKind.VITA3K,
             StandaloneSaveKind.forGame("psvita", "Vita3K"),
         )
+        assertEquals(
+            StandaloneSaveKind.DOLPHIN,
+            StandaloneSaveKind.forGame("gc", "Dolphin"),
+        )
+        assertEquals(
+            StandaloneSaveKind.DOLPHIN,
+            StandaloneSaveKind.forGame("WII", "dolphin"),
+        )
     }
 
     @Test fun `does not claim other Citra builds`() {
         assertNull(StandaloneSaveKind.forGame("3DS", "Citra"))
         assertNull(StandaloneSaveKind.forGame("3DS", "Azahar"))
+        assertNull(StandaloneSaveKind.forGame("GC", "Dolphin MMJR"))
     }
 
     @Test fun `only Citra receives its double slash document id workaround`() {

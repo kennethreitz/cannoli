@@ -49,7 +49,7 @@ class SyncHistoryRowsTest {
     }
 
     @Test
-    fun `successful save state transfers can be played from history`() {
+    fun `successful ordinary save transfers can be played from history`() {
         val now = 1_000L
         val rows = buildHistoryRows(
             listOf(
@@ -62,9 +62,9 @@ class SyncHistoryRowsTest {
             "just now",
         )
 
-        assertTrue(rows[0].canPlay)
-        assertTrue(rows[1].canPlay)
-        assertFalse(rows[2].canPlay)
+        assertFalse(rows[0].canPlay)
+        assertFalse(rows[1].canPlay)
+        assertTrue(rows[2].canPlay)
         assertFalse(rows[3].canPlay)
     }
 
