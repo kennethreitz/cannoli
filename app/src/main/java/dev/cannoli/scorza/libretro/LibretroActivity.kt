@@ -381,6 +381,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var cannoliRoot: String = ""
     private var trackSotnMap = false
     private var trackAriaOfSorrowMap = false
+    private var trackMetroidGbaMap = false
     private var trackPokemonFireEmerald = false
     private var trackSuperMarioWorld = false
     private var trackUniversalCompanion = false
@@ -634,6 +635,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         romPath = args.romPath
         trackSotnMap = SotnMapReader.matches(gameTitle, romPath)
         trackAriaOfSorrowMap = AriaOfSorrowMapReader.matches(gameTitle, romPath)
+        trackMetroidGbaMap = MetroidGbaMapReader.matches(gameTitle, romPath)
         trackPokemonFireEmerald = PokemonFireEmeraldReader.matches(gameTitle, romPath)
         trackSuperMarioWorld = SuperMarioWorldReader.matches(gameTitle, romPath)
         trackUniversalCompanion =
@@ -944,6 +946,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 glesBackend.onFrameRendered = {
                     if ((trackSotnMap ||
                             trackAriaOfSorrowMap ||
+                            trackMetroidGbaMap ||
                             trackPokemonFireEmerald ||
                             trackSuperMarioWorld) &&
                         ++companionFrame >= COMPANION_POLL_FRAMES
@@ -955,6 +958,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                         if (trackAriaOfSorrowMap) {
                             AriaOfSorrowMapReader.read(runner, romPath)
                                 ?.let(launchState::updateAriaOfSorrowMap)
+                        }
+                        if (trackMetroidGbaMap) {
+                            MetroidGbaMapReader.read(runner, gameTitle, romPath)
+                                ?.let(launchState::updateMetroidGbaMap)
                         }
                         if (trackPokemonFireEmerald) {
                             PokemonFireEmeraldReader.read(runner)
