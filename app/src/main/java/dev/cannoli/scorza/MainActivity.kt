@@ -96,6 +96,8 @@ import dev.cannoli.scorza.ui.LocalViewportInsets
 import dev.cannoli.scorza.ui.ViewportInsetsPx
 import dev.cannoli.scorza.ui.screens.BootErrorScreen
 import dev.cannoli.scorza.ui.screens.DialogState
+import dev.cannoli.scorza.ui.components.AriaOfSorrowMapCompanion
+import dev.cannoli.scorza.ui.components.shouldShowAriaOfSorrowMap
 import dev.cannoli.scorza.ui.components.SotnCastleMapCompanion
 import dev.cannoli.scorza.ui.components.shouldShowSotnCastleMap
 import dev.cannoli.scorza.ui.components.PokemonFireEmeraldCompanion
@@ -193,6 +195,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     private var launcherInputBlocked = false
     private var launcherDimmed by mutableStateOf(false)
     private var launcherSotnMapVisible by mutableStateOf(false)
+    private var launcherAriaOfSorrowMapVisible by mutableStateOf(false)
     private var launcherPokemonCompanionVisible by mutableStateOf(false)
     private var launcherSuperMarioWorldCompanionVisible by mutableStateOf(false)
     private var launcherUniversalCompanionDeckVisible by mutableStateOf(false)
@@ -359,6 +362,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
         setContent {
             val sotnMapSnapshot by launchState.sotnMap.collectAsState()
+            val ariaOfSorrowMapSnapshot by launchState.ariaOfSorrowMap.collectAsState()
             val pokemonFireEmeraldSnapshot by launchState.pokemonFireEmerald.collectAsState()
             val superMarioWorldSnapshot by launchState.superMarioWorld.collectAsState()
             val universalCompanionSnapshot by launchState.universalCompanion.collectAsState()
@@ -377,6 +381,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 val dimOverlayAlpha = launcherDimOverlayAlpha(
                     launcherDimmed &&
                         !launcherSotnMapVisible &&
+                        !launcherAriaOfSorrowMapVisible &&
                         !launcherPokemonCompanionVisible &&
                         !launcherSuperMarioWorldCompanionVisible &&
                         !launcherUniversalCompanionDeckVisible
@@ -466,6 +471,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
                         }
                         if (launcherSotnMapVisible) {
                             SotnCastleMapCompanion(snapshot = sotnMapSnapshot)
+                        } else if (launcherAriaOfSorrowMapVisible) {
+                            AriaOfSorrowMapCompanion(snapshot = ariaOfSorrowMapSnapshot)
                         } else if (launcherPokemonCompanionVisible) {
                             PokemonFireEmeraldCompanion(snapshot = pokemonFireEmeraldSnapshot)
                         } else if (launcherSuperMarioWorldCompanionVisible) {
@@ -766,7 +773,11 @@ class MainActivity : ComponentActivity(), ActivityActions {
         ) {
             window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
         }
-        return if (launcherSotnMapVisible) super.dispatchTouchEvent(event) else true
+        return if (launcherSotnMapVisible || launcherAriaOfSorrowMapVisible) {
+            super.dispatchTouchEvent(event)
+        } else {
+            true
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -1144,6 +1155,14 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 displayName = launchState.lastLaunched?.displayName,
                 fileName = launchState.lastLaunched?.path?.name,
             )
+        val showAriaOfSorrowMap = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowAriaOfSorrowMap(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
         val showPokemonCompanion = gameActive &&
             gameDisplayId != null &&
             gameDisplayId != launcherDisplayId &&
@@ -1170,12 +1189,14 @@ class MainActivity : ComponentActivity(), ActivityActions {
         )
         launcherDimmed = dim
         launcherSotnMapVisible = showSotnMap
+        launcherAriaOfSorrowMapVisible = showAriaOfSorrowMap
         launcherPokemonCompanionVisible = showPokemonCompanion
         launcherSuperMarioWorldCompanionVisible = showSuperMarioWorldCompanion
         launcherUniversalCompanionDeckVisible = showUniversalCompanionDeck
         updateLauncherInputBlock(
             dim ||
                 showSotnMap ||
+                showAriaOfSorrowMap ||
                 showPokemonCompanion ||
                 showSuperMarioWorldCompanion ||
                 showUniversalCompanionDeck
