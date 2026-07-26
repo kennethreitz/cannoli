@@ -65,18 +65,21 @@ class RetroAchievementsManager(
 
     fun loadGame(romPath: String, consoleId: Int) {
         logger("RA loadGame: romPath=$romPath consoleId=$consoleId")
+        resetCompanionSession()
         loadStartedAtMs = android.os.SystemClock.elapsedRealtime()
         nativeLoadGame(romPath, consoleId)
     }
 
     fun loadGameById(gameId: Int, consoleId: Int) {
         logger("RA loadGameById: gameId=$gameId consoleId=$consoleId")
+        resetCompanionSession()
         loadStartedAtMs = android.os.SystemClock.elapsedRealtime()
         nativeLoadGameById(gameId, consoleId)
     }
 
     fun unloadGame() {
         logger("RA unloadGame")
+        resetCompanionSession()
         nativeUnloadGame()
     }
 
@@ -123,6 +126,9 @@ class RetroAchievementsManager(
     }
 
     private var cachedAchievements: List<Achievement>? = null
+    @Volatile private var latestCompanionEvent: CompanionEvent? = null
+    private var companionBaselineUnlocked: Int? = null
+    private var companionBaselinePoints: Int? = null
     val pendingSyncIds: MutableMap<Int, String> = Collections.synchronizedMap(mutableMapOf())
     val syncingIds: MutableSet<Int> = Collections.synchronizedSet(mutableSetOf())
     val localUnlocks: MutableSet<Int> = Collections.synchronizedSet(mutableSetOf())
@@ -225,6 +231,110 @@ class RetroAchievementsManager(
             .sortedBy { if (it.points == 0) 1 else 0 }
         cachedAchievements = list
         return list
+    }
+
+    fun getUniversalCompanionSnapshot(nowMillis: Long = System.currentTimeMillis()): UniversalCompanionSnapshot {
+        val achievements = parseCompanionAchievements(nativeGetCompanionAchievementData())
+        val summary = parseCompanionSummary(nativeGetCompanionSummaryData())
+        val baselineUnlocked = companionBaselineUnlocked ?: summary.unlockedAchievements.also {
+            companionBaselineUnlocked = it
+        }
+        val baselinePoints = companionBaselinePoints ?: summary.unlockedPoints.also {
+            companionBaselinePoints = it
+        }
+        val activeChallenge = achievements.firstOrNull {
+            !it.unlocked && it.bucket == COMPANION_BUCKET_ACTIVE_CHALLENGE
+        }
+        val featuredAchievement = activeChallenge ?: achievements
+            .asSequence()
+            .filter { !it.unlocked }
+            .filter {
+                it.bucket == COMPANION_BUCKET_ALMOST_THERE ||
+                    (it.measuredPercent ?: 0f) > 0f ||
+                    it.type == COMPANION_ACHIEVEMENT_TYPE_PROGRESSION
+            }
+            .sortedWith(
+                compareByDescending<CompanionAchievement> {
+                    it.bucket == COMPANION_BUCKET_ALMOST_THERE
+                }.thenByDescending { it.measuredPercent ?: -1f }
+            )
+            .firstOrNull()
+
+        return UniversalCompanionSnapshot(
+            richPresence = richPresence,
+            memoryReady = isMemoryInitialized && gameId > 0,
+            unlockedAchievements = summary.unlockedAchievements,
+            totalAchievements = summary.totalAchievements,
+            unlockedPoints = summary.unlockedPoints,
+            totalPoints = summary.totalPoints,
+            sessionUnlockedAchievements =
+                (summary.unlockedAchievements - baselineUnlocked).coerceAtLeast(0),
+            sessionPoints = (summary.unlockedPoints - baselinePoints).coerceAtLeast(0),
+            featuredAchievement = featuredAchievement,
+            activeChallenge = activeChallenge,
+            activeLeaderboard = parseActiveLeaderboard(nativeGetActiveLeaderboardData()),
+            recentEvent = latestCompanionEvent?.takeIf {
+                nowMillis - it.observedAtMillis <= COMPANION_EVENT_VISIBLE_MS
+            },
+            observedAtMillis = nowMillis,
+        )
+    }
+
+    private fun resetCompanionSession() {
+        latestCompanionEvent = null
+        companionBaselineUnlocked = null
+        companionBaselinePoints = null
+    }
+
+    private data class CompanionSummary(
+        val totalAchievements: Int = 0,
+        val unlockedAchievements: Int = 0,
+        val totalPoints: Int = 0,
+        val unlockedPoints: Int = 0,
+    )
+
+    private fun parseCompanionSummary(raw: String): CompanionSummary {
+        val parts = raw.split('|')
+        if (parts.size < 4) return CompanionSummary()
+        return CompanionSummary(
+            totalAchievements = parts[0].toIntOrNull() ?: 0,
+            unlockedAchievements = parts[1].toIntOrNull() ?: 0,
+            totalPoints = parts[2].toIntOrNull() ?: 0,
+            unlockedPoints = parts[3].toIntOrNull() ?: 0,
+        )
+    }
+
+    private fun parseCompanionAchievements(raw: String): List<CompanionAchievement> {
+        if (raw.isEmpty()) return emptyList()
+        return raw.split(COMPANION_RECORD_SEPARATOR).mapNotNull { record ->
+            val parts = record.split(COMPANION_FIELD_SEPARATOR)
+            if (parts.size < 11) return@mapNotNull null
+            CompanionAchievement(
+                id = parts[0].toIntOrNull() ?: return@mapNotNull null,
+                title = parts[1],
+                description = parts[2],
+                points = parts[3].toIntOrNull() ?: 0,
+                unlocked = parts[4] == "1",
+                measuredProgress = parts[5].takeIf(String::isNotBlank),
+                measuredPercent = parts[6].toFloatOrNull()?.takeIf { it > 0f },
+                bucket = parts[7].toIntOrNull() ?: 0,
+                rarity = parts[8].toFloatOrNull()?.takeIf { it > 0f },
+                type = parts[9].toIntOrNull() ?: 0,
+                badgeUrl = parts[10].takeIf(String::isNotBlank),
+            )
+        }
+    }
+
+    private fun parseActiveLeaderboard(raw: String): CompanionLeaderboard? {
+        if (raw.isEmpty()) return null
+        val parts = raw.split(COMPANION_FIELD_SEPARATOR)
+        if (parts.size < 4) return null
+        return CompanionLeaderboard(
+            id = parts[0].toIntOrNull() ?: return null,
+            title = parts[1],
+            description = parts[2],
+            trackerValue = parts[3],
+        )
     }
 
     fun invalidateCache() {
@@ -371,6 +481,36 @@ class RetroAchievementsManager(
     }
 
     @Suppress("unused")
+    private fun onCompanionEvent(
+        type: Int,
+        id: Int,
+        title: String,
+        description: String,
+        value: String,
+        bestValue: String,
+        rank: Int,
+        totalEntries: Int,
+        points: Int,
+        badgeUrl: String,
+    ) {
+        logger("RA companion event: type=$type id=$id title=$title value=$value rank=$rank")
+        if (type !in COMPANION_TRANSIENT_EVENT_TYPES) return
+        latestCompanionEvent = CompanionEvent(
+            type = type,
+            id = id,
+            title = title,
+            description = description,
+            value = value.takeIf(String::isNotBlank),
+            bestValue = bestValue.takeIf(String::isNotBlank),
+            rank = rank,
+            totalEntries = totalEntries,
+            points = points,
+            badgeUrl = badgeUrl.takeIf(String::isNotBlank),
+            observedAtMillis = System.currentTimeMillis(),
+        )
+    }
+
+    @Suppress("unused")
     private fun onLoginResult(success: Boolean, displayNameOrError: String, token: String?) {
         logger("RA login result: success=$success offline=$isOffline pendingSync=${pendingSyncIds.size}")
         if (success && !isOffline) syncPending()
@@ -426,6 +566,9 @@ class RetroAchievementsManager(
     private external fun nativeGetUserAgentClause(): String
     private external fun nativeHttpResponse(requestPtr: Long, body: String, httpStatus: Int)
     private external fun nativeGetAchievementData(): String
+    private external fun nativeGetCompanionAchievementData(): String
+    private external fun nativeGetCompanionSummaryData(): String
+    private external fun nativeGetActiveLeaderboardData(): String
     private external fun nativeSerializeProgress(): ByteArray?
     private external fun nativeDeserializeProgress(data: ByteArray): Boolean
     private external fun nativeQueueUnlock(achievementId: Int, gameHash: String)
@@ -442,6 +585,17 @@ class RetroAchievementsManager(
         private const val EVENT_DISCONNECTED = 17
         private const val EVENT_RECONNECTED = 18
         private const val EVENT_DETECTION_READY = 1000
+        private const val COMPANION_EVENT_VISIBLE_MS = 7_000L
+        private const val COMPANION_RECORD_SEPARATOR = '\u001E'
+        private const val COMPANION_FIELD_SEPARATOR = '\u001F'
+        private val COMPANION_TRANSIENT_EVENT_TYPES = setOf(
+            CompanionEvent.ACHIEVEMENT_UNLOCKED,
+            CompanionEvent.LEADERBOARD_FAILED,
+            CompanionEvent.LEADERBOARD_SUBMITTED,
+            CompanionEvent.LEADERBOARD_SCOREBOARD,
+            CompanionEvent.GAME_COMPLETED,
+            CompanionEvent.SUBSET_COMPLETED,
+        )
         private val CACHE_KEY_STRIP_REGEX = Regex("[&?](t|u)=[^&]+")
 
     }
