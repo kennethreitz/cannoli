@@ -20,6 +20,13 @@ class PlatformsJsonAssetTest {
         check(pc.getAllTags().isNotEmpty())
     }
 
+    @Test fun `NES defaults to the memory-map aware FCEUmm core`() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val pc = PlatformConfig(File(ctx.cacheDir, "nes-core-root"), ctx.assets)
+
+        assertEquals("fceumm_libretro", pc.getCoreMapping("NES"))
+    }
+
     @Test fun `bundled PC platform launches GameNative from the file contents`() {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         val config = PlatformConfig(File(ctx.cacheDir, "fake-root-pc"), ctx.assets)

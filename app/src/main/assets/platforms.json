@@ -38,7 +38,7 @@
   },
   "NES": {
     "name": "Nintendo Entertainment System",
-    "core": "nestopia_libretro",
+    "core": "fceumm_libretro",
     "app": [
       { "package": "com.explusalpha.NesEmu", "data": { "kind": "file_provider" } },
       { "package": "com.fms.ines.free", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
