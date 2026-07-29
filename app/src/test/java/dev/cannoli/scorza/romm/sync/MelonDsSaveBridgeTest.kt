@@ -1,6 +1,8 @@
 package dev.cannoli.scorza.romm.sync
 
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import io.mockk.every
 import io.mockk.mockk
@@ -23,7 +25,11 @@ class MelonDsSaveBridgeTest {
         every { paths.romDir } returns File(tmp.root, "ROMS")
         val platforms = mockk<PlatformConfig>(relaxed = true)
         every { platforms.getSelectedStandaloneAppPackage("NDS") } returns packageName
-        return MelonDsSaveBridge(paths, platforms)
+        return MelonDsSaveBridge(
+            paths, platforms,
+            roms = mockk<RomsRepository>(relaxed = true),
+            gameOverrides = mockk<GameOverrideStore>(relaxed = true),
+        )
     }
 
     private fun zippedRom(gameKey: String, entryName: String): File =

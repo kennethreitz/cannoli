@@ -26,12 +26,25 @@ class StandaloneSaveKindTest {
             StandaloneSaveKind.DOLPHIN,
             StandaloneSaveKind.forGame("WII", "dolphin"),
         )
+        assertEquals(
+            StandaloneSaveKind.PPSSPP,
+            StandaloneSaveKind.forGame("PSP", "PPSSPP (Standalone)"),
+        )
+        assertEquals(
+            StandaloneSaveKind.PPSSPP,
+            StandaloneSaveKind.forGame("psp", "PPSSPP Gold"),
+        )
+        assertEquals(
+            setOf("org.ppsspp.ppsspp", "org.ppsspp.ppssppgold"),
+            StandaloneSaveKind.PPSSPP.packageNames,
+        )
     }
 
     @Test fun `does not claim other Citra builds`() {
         assertNull(StandaloneSaveKind.forGame("3DS", "Citra"))
         assertNull(StandaloneSaveKind.forGame("3DS", "Azahar"))
         assertNull(StandaloneSaveKind.forGame("GC", "Dolphin MMJR"))
+        assertNull(StandaloneSaveKind.forGame("PSP", "PPSSPP"))
     }
 
     @Test fun `only Citra receives its double slash document id workaround`() {

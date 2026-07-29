@@ -460,6 +460,7 @@ fun DialogOverlay(
                 dialogState.cemuAvailable,
                 dialogState.vita3kAvailable,
                 dialogState.dolphinAvailable,
+                dialogState.ppssppAvailable,
             )
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
             val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
@@ -578,6 +579,17 @@ fun DialogOverlay(
                             label = stringResource(R.string.romm_dolphin_saves_experimental),
                             value = stringResource(
                                 if (dialogState.dolphinLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.PPSSPP -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_ppsspp_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.ppssppLinked) R.string.romm_save_folder_connected
                                 else R.string.romm_save_folder_connect,
                             ),
                             isSelected = isSelected,
@@ -1355,7 +1367,7 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, DOLPHIN, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, DOLPHIN, PPSSPP, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
         fun visibleRows(
             supported: Boolean,
@@ -1367,6 +1379,7 @@ enum class RommSaveSyncRow {
             cemuAvailable: Boolean = false,
             vita3kAvailable: Boolean = false,
             dolphinAvailable: Boolean = false,
+            ppssppAvailable: Boolean = false,
         ): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
@@ -1377,6 +1390,7 @@ enum class RommSaveSyncRow {
                     if (cemuAvailable) add(CEMU)
                     if (vita3kAvailable) add(VITA3K)
                     if (dolphinAvailable) add(DOLPHIN)
+                    if (ppssppAvailable) add(PPSSPP)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)
                     if (syncErrors > 0) add(ERRORS)

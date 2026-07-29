@@ -38,12 +38,15 @@ class StandaloneSaveBridge @Inject constructor(
 
     fun isGameActive(): Boolean = launchState.gameActive.value
 
-    fun isInstalled(kind: StandaloneSaveKind): Boolean = try {
+    fun isInstalled(kind: StandaloneSaveKind): Boolean =
+        kind.packageNames.any(::isPackageInstalled)
+
+    private fun isPackageInstalled(packageName: String): Boolean = try {
         if (Build.VERSION.SDK_INT >= 33) {
-            context.packageManager.getPackageInfo(kind.packageName, PackageManager.PackageInfoFlags.of(0))
+            context.packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
         } else {
             @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(kind.packageName, 0)
+            context.packageManager.getPackageInfo(packageName, 0)
         }
         true
     } catch (_: PackageManager.NameNotFoundException) {
@@ -98,6 +101,9 @@ class StandaloneSaveBridge @Inject constructor(
         base: String,
     ): StandaloneMirrorResult {
         val tag = gameKey.substringBefore('/')
+        if (kind == StandaloneSaveKind.PPSSPP) {
+            return refreshPpssppMirror(gameKey, tag, base)
+        }
         if (kind == StandaloneSaveKind.DOLPHIN) {
             return refreshDolphinMirror(gameKey, tag, base)
         }
@@ -151,6 +157,10 @@ class StandaloneSaveBridge @Inject constructor(
         gameKey: String,
         archive: File,
     ) {
+        if (kind == StandaloneSaveKind.PPSSPP) {
+            applyPpssppMirror(gameKey, archive)
+            return
+        }
         if (kind == StandaloneSaveKind.DOLPHIN) {
             applyDolphinMirror(gameKey, archive)
             return
@@ -180,18 +190,22 @@ class StandaloneSaveBridge @Inject constructor(
         }
     }
 
-    fun archiveMode(kind: StandaloneSaveKind?): LocalSaveMode =
-        if (kind != null) LocalSaveMode.STANDALONE_ARCHIVE else LocalSaveMode.NORMAL
+    fun archiveMode(kind: StandaloneSaveKind?): LocalSaveMode = when (kind) {
+        null -> LocalSaveMode.NORMAL
+        StandaloneSaveKind.PPSSPP -> LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE
+        else -> LocalSaveMode.STANDALONE_ARCHIVE
+    }
 
     private fun directFileRoot(kind: StandaloneSaveKind): File? {
-        if (kind != StandaloneSaveKind.VITA3K) return null
-        val root = File(VITA3K_PUBLIC_ROOT)
-        val savedata = File(root, VITA3K_SAVEDATA_PATH)
-        return root.takeIf {
-            it.isDirectory &&
-                savedata.isDirectory &&
-                savedata.canRead() &&
-                savedata.canWrite()
+        val (rootPath, savedataPath) = when (kind) {
+            StandaloneSaveKind.VITA3K -> VITA3K_PUBLIC_ROOT to VITA3K_SAVEDATA_PATH
+            StandaloneSaveKind.PPSSPP -> PPSSPP_PUBLIC_ROOT to PpssppSaveBundle.SAVEDATA_PATH
+            else -> return null
+        }
+        val publicRoot = File(rootPath)
+        val savedata = File(publicRoot, savedataPath)
+        return publicRoot.takeIf {
+            it.isDirectory && savedata.isDirectory && savedata.canRead() && savedata.canWrite()
         }
     }
 
@@ -289,12 +303,17 @@ class StandaloneSaveBridge @Inject constructor(
                 docs.findPath(docs.root, listOf("Config")) != null &&
                     (docs.findPath(docs.root, listOf("GC")) != null ||
                         docs.findPath(docs.root, listOf("Wii")) != null)
+            StandaloneSaveKind.PPSSPP ->
+                docs.findPath(docs.root, listOf("PSP", "SAVEDATA")) != null
             else -> true
         }
     }.getOrDefault(false)
 
     private fun standaloneArchive(tag: String, base: String): File =
         File(File(root, "Saves/$tag"), "$base$STANDALONE_SUFFIX")
+
+    private fun ppssppArchive(tag: String, base: String): File =
+        File(File(root, "Saves/$tag"), "$base$PPSSPP_SUFFIX")
 
     private fun findSaveRoot(
         docs: DocumentTree,
@@ -333,6 +352,7 @@ class StandaloneSaveBridge @Inject constructor(
             listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
         )
         StandaloneSaveKind.DOLPHIN -> error("Dolphin saves use per-game file filtering")
+        StandaloneSaveKind.PPSSPP -> error("PPSSPP saves use per-game directory filtering")
     }
 
     private fun createSaveRoot(
@@ -358,6 +378,150 @@ class StandaloneSaveBridge @Inject constructor(
             listOf("ux0", "user", "00", "savedata", titleId.uppercase()),
         )
         StandaloneSaveKind.DOLPHIN -> error("Dolphin saves use per-game file filtering")
+        StandaloneSaveKind.PPSSPP -> error("PPSSPP saves use per-game directory filtering")
+    }
+
+    private fun refreshPpssppMirror(
+        gameKey: String,
+        tag: String,
+        base: String,
+    ): StandaloneMirrorResult {
+        val kind = StandaloneSaveKind.PPSSPP
+        val rom = File(romDir, gameKey)
+        val titleId = PpssppGameIdParser.gameId(rom)
+            ?: return StandaloneMirrorResult.Unavailable("could not read PSP game ID from ${rom.name}")
+        return try {
+            val archive = ppssppArchive(tag, base)
+            val archiveDir = requireNotNull(archive.parentFile).apply { mkdirs() }
+            val temp = File.createTempFile("ppsspp-save", ".zip", archiveDir)
+            try {
+                val newest: Long
+                val tree = treeUri(kind)
+                val fileRoot = if (tree == null) directFileRoot(kind) else null
+                if (tree != null) {
+                    val docs = DocumentTree(resolver, tree)
+                    val files = ppssppDocumentSaveEntries(docs, titleId)
+                    if (files.isEmpty()) {
+                        archive.delete()
+                        return StandaloneMirrorResult.Missing
+                    }
+                    writePpssppDocumentArchive(docs, files, temp)
+                    newest = files.maxOfOrNull { it.node.lastModified } ?: 0L
+                } else if (fileRoot != null) {
+                    val fileTimestamp = PpssppSaveBundle.createFromMemstick(
+                        fileRoot,
+                        titleId,
+                        temp,
+                    )
+                    if (fileTimestamp == null) {
+                        archive.delete()
+                        return StandaloneMirrorResult.Missing
+                    }
+                    newest = fileTimestamp
+                } else {
+                    return StandaloneMirrorResult.Unavailable("PPSSPP memory-stick folder is not connected")
+                }
+                val currentHash = archive.takeIf(File::isFile)?.let(SaveHasher::hashZipBundle)
+                val nextHash = SaveHasher.hashZipBundle(temp)
+                    ?: throw IllegalStateException("PPSSPP save bundle is empty")
+                if (currentHash != nextHash) {
+                    replaceFile(temp, archive)
+                    archive.setLastModified(if (newest > 0L) newest else System.currentTimeMillis())
+                }
+                StandaloneMirrorResult.Ready(archive)
+            } finally {
+                temp.delete()
+            }
+        } catch (t: Throwable) {
+            StandaloneMirrorResult.Unavailable(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    private fun applyPpssppMirror(gameKey: String, archive: File) {
+        val kind = StandaloneSaveKind.PPSSPP
+        val rom = File(romDir, gameKey)
+        val titleId = PpssppGameIdParser.gameId(rom)
+            ?: throw IllegalStateException("could not read PSP game ID from ${rom.name}")
+        val tree = treeUri(kind)
+        if (tree == null) {
+            directFileRoot(kind)?.let { fileRoot ->
+                PpssppSaveBundle.restoreToMemstick(archive, fileRoot, titleId)
+                return
+            }
+            throw IllegalStateException("PPSSPP memory-stick folder is not connected")
+        }
+        val stage = createStageDirectory()
+        try {
+            val incomingDirectories = PpssppSaveBundle.extractAndValidate(archive, stage, titleId)
+            val docs = DocumentTree(resolver, tree)
+            reconcilePpssppDocuments(docs, stage, titleId, incomingDirectories)
+        } finally {
+            stage.deleteRecursively()
+        }
+    }
+
+    private fun ppssppDocumentSaveDirectories(
+        docs: DocumentTree,
+        titleId: String,
+    ): List<DocumentNode> {
+        val savedata = docs.findPath(docs.root, listOf("PSP", "SAVEDATA")) ?: return emptyList()
+        return docs.children(savedata).filter { directory ->
+            if (!directory.isDirectory) return@filter false
+            val param = docs.child(directory, "PARAM.SFO")
+                ?.takeIf { !it.isDirectory }
+                ?.let { node ->
+                    runCatching {
+                        docs.openInput(node).use { it.readAtMost(MAX_PPSSPP_PARAM_SFO_BYTES.toInt()) }
+                    }.getOrNull()
+                }
+            PpssppSaveBundle.matchesSaveDirectory(directory.displayName, titleId, param)
+        }
+    }
+
+    private fun ppssppDocumentSaveEntries(
+        docs: DocumentTree,
+        titleId: String,
+    ): List<DocumentFileEntry> =
+        ppssppDocumentSaveDirectories(docs, titleId).flatMap { directory ->
+            docs.walkFiles(directory).map { entry ->
+                entry.copy(
+                    relativePath = "${PpssppSaveBundle.SAVEDATA_PATH}/" +
+                        "${directory.displayName}/${entry.relativePath}",
+                )
+            }
+        }.sortedBy { it.relativePath }
+
+    private fun writePpssppDocumentArchive(
+        docs: DocumentTree,
+        files: List<DocumentFileEntry>,
+        destination: File,
+    ) {
+        ZipOutputStream(destination.outputStream().buffered()).use { zip ->
+            for (entry in files.sortedBy { it.relativePath }) {
+                zip.putNextEntry(stableEntry(entry.relativePath))
+                docs.openInput(entry.node).use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun reconcilePpssppDocuments(
+        docs: DocumentTree,
+        stage: File,
+        titleId: String,
+        incomingDirectories: Set<String>,
+    ) {
+        val savedata = docs.ensurePath(docs.root, listOf("PSP", "SAVEDATA"))
+        val existing = ppssppDocumentSaveDirectories(docs, titleId)
+            .associateBy { it.displayName.lowercase() }
+        val sourceRoot = File(stage, PpssppSaveBundle.SAVEDATA_PATH)
+        for (name in incomingDirectories.sorted()) {
+            val source = File(sourceRoot, name)
+            val target = docs.child(savedata, name) ?: docs.createDirectory(savedata, name)
+            reconcile(docs, target, source, allowCreate = true)
+        }
+        val incomingKeys = incomingDirectories.mapTo(HashSet()) { it.lowercase() }
+        existing.filterKeys { it !in incomingKeys }.values.forEach(docs::delete)
     }
 
     private fun refreshDolphinMirror(
@@ -710,6 +874,20 @@ class StandaloneSaveBridge @Inject constructor(
 
     private fun stableEntry(name: String) = ZipEntry(name).apply { time = 0L }
 
+    private fun java.io.InputStream.readAtMost(maxBytes: Int): ByteArray {
+        val output = java.io.ByteArrayOutputStream(minOf(maxBytes, 8192))
+        val buffer = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val count = read(buffer)
+            if (count < 0) break
+            total += count
+            check(total <= maxBytes) { "PPSSPP PARAM.SFO is too large" }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
+
     private fun replaceFile(source: File, destination: File) {
         destination.parentFile?.mkdirs()
         if (!source.renameTo(destination)) {
@@ -730,12 +908,15 @@ class StandaloneSaveBridge @Inject constructor(
         const val DOCUMENT_ROOT_ID = "root"
         const val TREE_PREFERENCES = "standalone_save_trees"
         const val STANDALONE_SUFFIX = ".cannoli-standalone.zip"
+        const val PPSSPP_SUFFIX = ".cannoli-ppsspp.zip"
         const val MANIFEST_NAME = "cannoli-standalone-save.txt"
         const val ARCHIVE_FORMAT = 1
         const val MAX_ARCHIVE_ENTRIES = 100_000
         const val MAX_ARCHIVE_BYTES = 1024L * 1024L * 1024L
         const val VITA3K_PUBLIC_ROOT = "/storage/emulated/0/Vita3K/vita"
         const val VITA3K_SAVEDATA_PATH = "ux0/user/00/savedata"
+        const val PPSSPP_PUBLIC_ROOT = "/storage/emulated/0"
+        const val MAX_PPSSPP_PARAM_SFO_BYTES = 1024L * 1024L
         const val DOLPHIN_GAME_ID_LENGTH = 6
     }
 }

@@ -8,7 +8,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 
 class LocalSaveResolverTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -131,5 +133,34 @@ class LocalSaveResolverTest {
             "ARCHIVE",
             File(saves("WIIU"), "Mario.cannoli-standalone.zip").readText(),
         )
+    }
+
+    @Test fun ppsspp_directory_bundle_uses_interoperable_name_and_logical_hash() {
+        val first = tmp.newFile("first.zip")
+        ZipOutputStream(first.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("PSP/SAVEDATA/UCUS98662_GameData0/DATA.BIN").apply { time = 1_000L })
+            zip.write("SAVE".toByteArray())
+            zip.closeEntry()
+        }
+        val resolver = LocalSaveResolver(tmp.root)
+        resolver.applyDownload("PSP", "LocoRoco", first, LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE)
+        val initial = resolver.resolve("PSP", "LocoRoco", LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE)!!
+
+        val second = tmp.newFile("second.zip")
+        ZipOutputStream(second.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("PSP/SAVEDATA/UCUS98662_GameData0/DATA.BIN").apply { time = 9_000L })
+            zip.write("SAVE".toByteArray())
+            zip.closeEntry()
+        }
+        resolver.applyDownload("PSP", "LocoRoco", second, LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE)
+        val updated = resolver.resolve("PSP", "LocoRoco", LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE)!!
+
+        assertEquals("LocoRoco.ppsspp.zip", updated.uploadFileName)
+        assertEquals(initial.contentHash, updated.contentHash)
+        assertEquals(
+            "LocoRoco.cannoli-ppsspp.zip",
+            updated.files.single().name,
+        )
+        assertNull(resolver.resolve("PSP", "LocoRoco"))
     }
 }

@@ -266,6 +266,7 @@ class DialogInputHandler @Inject constructor(
                     ds.cemuAvailable,
                     ds.vita3kAvailable,
                     ds.dolphinAvailable,
+                    ds.ppssppAvailable,
                 ).size
                 nav.dialogState.value = ds.copy(selectedIndex = (ds.selectedIndex - 1).mod(size))
             }
@@ -363,6 +364,7 @@ class DialogInputHandler @Inject constructor(
                     ds.cemuAvailable,
                     ds.vita3kAvailable,
                     ds.dolphinAvailable,
+                    ds.ppssppAvailable,
                 ).size
                 nav.dialogState.value = ds.copy(selectedIndex = (ds.selectedIndex + 1).mod(size))
             }
@@ -853,6 +855,12 @@ class DialogInputHandler @Inject constructor(
         dolphinLinked = standaloneSaveBridge.isLinked(
             dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN,
         ),
+        ppssppAvailable = standaloneSaveBridge.isInstalled(
+            dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP,
+        ),
+        ppssppLinked = standaloneSaveBridge.isLinked(
+            dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP,
+        ),
     )
 
     private fun toggleSaveSync(ds: DialogState.RommSaveSyncMenu) {
@@ -885,6 +893,7 @@ class DialogInputHandler @Inject constructor(
             ds.cemuAvailable,
             ds.vita3kAvailable,
             ds.dolphinAvailable,
+            ds.ppssppAvailable,
         ).getOrNull(ds.selectedIndex)) {
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.TOGGLE -> toggleSaveSync(ds)
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.INTERVAL -> {
@@ -918,6 +927,7 @@ class DialogInputHandler @Inject constructor(
             ds.cemuAvailable,
             ds.vita3kAvailable,
             ds.dolphinAvailable,
+            ds.ppssppAvailable,
         ).getOrNull(ds.selectedIndex)) {
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.TOGGLE -> toggleSaveSync(ds)
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.HISTORY -> openSyncHistory(fromSaveSyncMenu = true)
@@ -935,6 +945,9 @@ class DialogInputHandler @Inject constructor(
             )
             dev.cannoli.scorza.ui.components.RommSaveSyncRow.DOLPHIN -> activityActions.requestStandaloneSaveAccess(
                 dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN,
+            )
+            dev.cannoli.scorza.ui.components.RommSaveSyncRow.PPSSPP -> activityActions.requestStandaloneSaveAccess(
+                dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP,
             )
             else -> {}
         }
@@ -958,6 +971,7 @@ class DialogInputHandler @Inject constructor(
                 standaloneSaveBridge.isInstalled(dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CEMU),
                 standaloneSaveBridge.isInstalled(dev.cannoli.scorza.romm.sync.StandaloneSaveKind.VITA3K),
                 standaloneSaveBridge.isInstalled(dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN),
+                standaloneSaveBridge.isInstalled(dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP),
             ).indexOf(row).coerceAtLeast(0)
             withContext(Dispatchers.Main) { nav.dialogState.value = buildSaveSyncMenu(selectedIndex = idx, pendingConflicts = count) }
         }

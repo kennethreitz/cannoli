@@ -1,6 +1,9 @@
 package dev.cannoli.scorza.romm.sync
 
+import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
+import dev.cannoli.scorza.db.GameOverrideStore
+import dev.cannoli.scorza.db.RomsRepository
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import java.io.File
 import java.util.UUID
@@ -19,13 +22,19 @@ import javax.inject.Singleton
 class MelonDsSaveBridge @Inject constructor(
     private val pathsProvider: CannoliPathsProvider,
     private val platformConfig: PlatformConfig,
+    private val roms: RomsRepository,
+    private val gameOverrides: GameOverrideStore,
 ) {
     fun supports(tag: String, @Suppress("UNUSED_PARAMETER") emulator: String?, gameKey: String): Boolean {
         if (!tag.equals(NDS_TAG, ignoreCase = true)) return false
         val rom = File(pathsProvider.romDir, gameKey)
         if (!rom.isFile) return false
-        val packageName = platformConfig.getGameOverride(rom.absolutePath)?.appPackage
-            ?: platformConfig.getSelectedStandaloneAppPackage(tag)
+        val override = roms.romIdForRelativePath(gameKey)?.let { gameOverrides.get(it) }
+        val packageName = when {
+            override?.source == EmulatorSource.Standalone -> override.appPackage
+            override != null -> null
+            else -> platformConfig.getSelectedStandaloneAppPackage(tag)
+        }
         return packageName in MELONDS_PACKAGES
     }
 
