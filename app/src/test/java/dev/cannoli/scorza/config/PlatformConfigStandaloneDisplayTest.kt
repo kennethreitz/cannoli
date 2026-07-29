@@ -3,6 +3,7 @@ package dev.cannoli.scorza.config
 import androidx.test.core.app.ApplicationProvider
 import dev.cannoli.scorza.model.Rom
 import dev.cannoli.scorza.romm.sync.RomKeys
+import dev.cannoli.scorza.romm.sync.StandaloneSaveKind
 import dev.cannoli.scorza.ui.screens.EmulatorMappingStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,6 +45,23 @@ class PlatformConfigStandaloneDisplayTest {
         val rom = Rom(0, java.io.File("/tmp/game.wua"), "WIIU", "Game")
 
         assertEquals("Cemu", RomKeys.coreDisplayNameFor(rom, pc))
+    }
+
+    @Test fun `PPSSPP standalone sync identity does not claim the embedded core`() {
+        val pc = config()
+        val rom = Rom(0, java.io.File("/tmp/game.iso"), "PSP", "Game")
+
+        val embeddedIdentity = RomKeys.coreDisplayNameFor(rom, pc)
+        assertEquals("ppsspp_libretro", embeddedIdentity)
+        assertEquals(null, StandaloneSaveKind.forGame("PSP", embeddedIdentity))
+
+        pc.setAppMapping("PSP", "org.ppsspp.ppsspp")
+        val standaloneIdentity = RomKeys.coreDisplayNameFor(rom, pc)
+        assertEquals("PPSSPP (Standalone)", standaloneIdentity)
+        assertEquals(
+            StandaloneSaveKind.PPSSPP,
+            StandaloneSaveKind.forGame("PSP", standaloneIdentity),
+        )
     }
 
     @Test fun `a mapped core confirmed missing is flagged NOT_INSTALLED`() {

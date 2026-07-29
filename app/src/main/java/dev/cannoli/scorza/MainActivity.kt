@@ -272,6 +272,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 dolphinLinked = standaloneSaveBridge.isLinked(
                     dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN,
                 ),
+                ppssppLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP,
+                ),
             )
         }
         if (linked) syncScheduler.syncNow()

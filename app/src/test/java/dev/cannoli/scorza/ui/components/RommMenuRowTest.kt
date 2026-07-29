@@ -43,10 +43,12 @@ class RommMenuRowTest {
             citraAvailable = true,
             cemuAvailable = true,
             vita3kAvailable = true,
+            ppssppAvailable = true,
         )
 
         assertEquals(true, rows.contains(RommSaveSyncRow.CITRA))
         assertEquals(true, rows.contains(RommSaveSyncRow.CEMU))
         assertEquals(true, rows.contains(RommSaveSyncRow.VITA3K))
+        assertEquals(true, rows.contains(RommSaveSyncRow.PPSSPP))
     }
 }

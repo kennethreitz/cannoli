@@ -140,6 +140,8 @@ sealed interface DialogState {
         val vita3kLinked: Boolean = false,
         val dolphinAvailable: Boolean = false,
         val dolphinLinked: Boolean = false,
+        val ppssppAvailable: Boolean = false,
+        val ppssppLinked: Boolean = false,
     ) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null) : DialogState
     data class RommUploadConfirm(

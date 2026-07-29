@@ -17,6 +17,7 @@ data class LocalSave(
 enum class LocalSaveMode {
     NORMAL,
     STANDALONE_ARCHIVE,
+    PPSSPP_DIRECTORY_ARCHIVE,
 }
 
 class LocalSaveResolver(private val cannoliRoot: File) {
@@ -26,13 +27,14 @@ class LocalSaveResolver(private val cannoliRoot: File) {
     private fun matchingFiles(tag: String, base: String, mode: LocalSaveMode): List<File> {
         val dir = savesDir(tag)
         if (!dir.isDirectory) return emptyList()
-        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
-            return listOf(File(dir, "$base.cannoli-standalone.zip")).filter { it.isFile }
+        archiveFileName(base, mode)?.let { name ->
+            return listOf(File(dir, name)).filter { it.isFile }
         }
         return dir.listFiles().orEmpty()
             .filter {
                 it.isFile &&
                     !it.name.endsWith(".cannoli-standalone.zip") &&
+                    !it.name.endsWith(".cannoli-ppsspp.zip") &&
                     (it.nameWithoutExtension == base || it.name.startsWith("$base."))
             }
             .sortedBy { it.name }
@@ -42,10 +44,11 @@ class LocalSaveResolver(private val cannoliRoot: File) {
         val files = matchingFiles(tag, base, mode)
         if (files.isEmpty()) return null
         val isBundle = mode == LocalSaveMode.NORMAL && files.size > 1
-        val hash = if (isBundle) {
-            SaveHasher.hashBundle(files.associateBy { it.name })
-        } else {
-            SaveHasher.hashFile(files.single())
+        val hash = when {
+            isBundle -> SaveHasher.hashBundle(files.associateBy { it.name })
+            mode == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE ->
+                SaveHasher.hashZipBundle(files.single()) ?: return null
+            else -> SaveHasher.hashFile(files.single())
         }
         return LocalSave(
             files = files,
@@ -53,7 +56,11 @@ class LocalSaveResolver(private val cannoliRoot: File) {
             sizeBytes = files.sumOf { it.length() },
             modifiedMillis = files.maxOf { it.lastModified() },
             contentHash = hash,
-            uploadFileName = if (isBundle || mode == LocalSaveMode.STANDALONE_ARCHIVE) "$base.zip" else "$base.srm",
+            uploadFileName = when {
+                mode == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE -> "$base.ppsspp.zip"
+                isBundle || mode == LocalSaveMode.STANDALONE_ARCHIVE -> "$base.zip"
+                else -> "$base.srm"
+            },
         )
     }
 
@@ -64,7 +71,7 @@ class LocalSaveResolver(private val cannoliRoot: File) {
         mode: LocalSaveMode = LocalSaveMode.NORMAL,
     ): File {
         val files = matchingFiles(tag, base, mode)
-        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
+        if (mode != LocalSaveMode.NORMAL) {
             files.single().copyTo(dest, overwrite = true)
             return dest
         }
@@ -85,8 +92,8 @@ class LocalSaveResolver(private val cannoliRoot: File) {
         mode: LocalSaveMode = LocalSaveMode.NORMAL,
     ) {
         val dir = savesDir(tag).apply { mkdirs() }
-        if (mode == LocalSaveMode.STANDALONE_ARCHIVE) {
-            val destination = File(dir, "$base.cannoli-standalone.zip")
+        archiveFileName(base, mode)?.let { name ->
+            val destination = File(dir, name)
             val part = File(dir, ".part_${java.util.UUID.randomUUID().toString().take(8)}_${destination.name}")
             try {
                 downloaded.copyTo(part, overwrite = true)
@@ -137,5 +144,11 @@ class LocalSaveResolver(private val cannoliRoot: File) {
     private fun isZip(file: File): Boolean = file.inputStream().use { ins ->
         val sig = ByteArray(4)
         ins.read(sig) == 4 && sig[0] == 0x50.toByte() && sig[1] == 0x4B.toByte()
+    }
+
+    private fun archiveFileName(base: String, mode: LocalSaveMode): String? = when (mode) {
+        LocalSaveMode.NORMAL -> null
+        LocalSaveMode.STANDALONE_ARCHIVE -> "$base.cannoli-standalone.zip"
+        LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE -> "$base.cannoli-ppsspp.zip"
     }
 }

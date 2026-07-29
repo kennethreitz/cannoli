@@ -16,6 +16,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -25,6 +27,8 @@ class RetroArchSaveBridgeTest {
     private lateinit var sd: File
     private lateinit var external: File
     private lateinit var bridge: RetroArchSaveBridge
+    private lateinit var config: PlatformConfig
+    private lateinit var paths: CannoliPathsProvider
     private val gameKey = "GBA/Castlevania - Aria of Sorrow.gba"
     private val base = "Castlevania - Aria of Sorrow"
 
@@ -36,8 +40,8 @@ class RetroArchSaveBridgeTest {
             sdCardRoot = sd.absolutePath
             retroArchPackage = RetroArchSaveBridge.PACKAGE_NAME
         }
-        val paths = CannoliPathsProvider(settings)
-        val config = PlatformConfig(sd, context.assets).apply {
+        paths = CannoliPathsProvider(settings)
+        config = PlatformConfig(sd, context.assets).apply {
             setCoreMapping("GBA", "mgba_libretro", "RetroArch")
         }
         File(paths.romDir, gameKey).apply {
@@ -95,5 +99,37 @@ class RetroArchSaveBridgeTest {
         assertEquals("ROMM-STATE", File(retroStates, "$base.state").readText())
         assertEquals("UNDO", File(retroStates, "$base.state.undo").readText())
         assertTrue(File(retroStates, "$base.state.auto").isFile)
+    }
+
+    @Test fun `PPSSPP directory bundle round trips through RetroArch save root`() {
+        val pspKey = "PSP/LocoRoco [UCUS98662].iso"
+        val pspBase = "LocoRoco [UCUS98662]"
+        config.setCoreMapping("PSP", "ppsspp_libretro", "RetroArch")
+        File(paths.romDir, pspKey).apply {
+            parentFile?.mkdirs()
+            writeText("ROM")
+        }
+        val savedata = File(external, "saves/PSP/SAVEDATA").apply { mkdirs() }
+        val gameSave = File(savedata, "UCUS98662_GameData0").apply { mkdirs() }
+        File(gameSave, "DATA.BIN").writeText("LOCAL")
+        val unrelated = File(savedata, "ULES00001DATA00").apply { mkdirs() }
+        File(unrelated, "DATA.BIN").writeText("OTHER")
+
+        assertEquals(
+            RetroArchMirrorResult.Ready,
+            bridge.refreshPpsspp("PSP", pspBase, pspKey),
+        )
+        val archive = File(sd, "Saves/PSP/$pspBase.cannoli-ppsspp.zip")
+        assertTrue(archive.isFile)
+
+        ZipOutputStream(archive.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("PSP/SAVEDATA/UCUS98662_GameData0/DATA.BIN"))
+            zip.write("REMOTE".toByteArray())
+            zip.closeEntry()
+        }
+        bridge.applyPpsspp("PSP", pspBase, pspKey)
+
+        assertEquals("REMOTE", File(gameSave, "DATA.BIN").readText())
+        assertEquals("OTHER", File(unrelated, "DATA.BIN").readText())
     }
 }

@@ -102,6 +102,58 @@ class RetroArchSaveBridge @Inject constructor(
         )
     }
 
+    /**
+     * PPSSPP does not expose a cartridge-style SRAM file. Its normal in-game
+     * save is a per-title directory below PSP/SAVEDATA, for both embedded
+     * Libretro and RetroArch AArch64.
+     */
+    fun refreshPpsspp(tag: String, base: String, gameKey: String): RetroArchMirrorResult {
+        ppssppUnavailableReason(gameKey)?.let { return RetroArchMirrorResult.Unavailable(it) }
+        val rom = File(pathsProvider.romDir, gameKey)
+        val gameId = PpssppGameIdParser.gameId(rom)
+            ?: return RetroArchMirrorResult.Unavailable("could not read PSP game ID from ${rom.name}")
+        val archive = File(paths.savesFor(tag), "$base$PPSSPP_ARCHIVE_SUFFIX")
+        val temp = File.createTempFile("ppsspp-save", ".zip", paths.savesFor(tag).apply { mkdirs() })
+        return try {
+            val newest = PpssppSaveBundle.createFromMemstick(
+                ppssppMemstickRoot(tag, gameKey),
+                gameId,
+                temp,
+            )
+            if (newest == null) {
+                archive.delete()
+                RetroArchMirrorResult.Missing
+            } else {
+                val currentHash = archive.takeIf(File::isFile)?.let(SaveHasher::hashZipBundle)
+                val nextHash = SaveHasher.hashZipBundle(temp)
+                    ?: return RetroArchMirrorResult.Unavailable("PPSSPP save bundle is empty")
+                if (currentHash != nextHash) {
+                    replaceFile(temp, archive)
+                    archive.setLastModified(if (newest > 0L) newest else System.currentTimeMillis())
+                }
+                RetroArchMirrorResult.Ready
+            }
+        } catch (t: Throwable) {
+            RetroArchMirrorResult.Unavailable(t.message ?: t.javaClass.simpleName)
+        } finally {
+            temp.delete()
+        }
+    }
+
+    fun applyPpsspp(tag: String, base: String, gameKey: String) {
+        ppssppUnavailableReason(gameKey)?.let { throw IllegalStateException(it) }
+        val rom = File(pathsProvider.romDir, gameKey)
+        val gameId = PpssppGameIdParser.gameId(rom)
+            ?: throw IllegalStateException("could not read PSP game ID from ${rom.name}")
+        val archive = File(paths.savesFor(tag), "$base$PPSSPP_ARCHIVE_SUFFIX")
+        check(archive.isFile) { "PPSSPP save archive was not staged" }
+        PpssppSaveBundle.restoreToMemstick(
+            archive,
+            ppssppMemstickRoot(tag, gameKey),
+            gameId,
+        )
+    }
+
     fun refreshStates(tag: String, base: String, gameKey: String): RetroArchMirrorResult =
         refresh(
             gameKey = gameKey,
@@ -154,6 +206,16 @@ class RetroArchSaveBridge @Inject constructor(
         else -> null
     }
 
+    private fun ppssppUnavailableReason(gameKey: String): String? =
+        if (supports(gameKey)) {
+            unavailableReason(gameKey)
+        } else {
+            "game is currently running".takeIf { isGameActive() }
+        }
+
+    private fun ppssppMemstickRoot(tag: String, gameKey: String): File =
+        if (supports(gameKey)) File(externalRoot(), SAVES_DIR) else paths.savesFor(tag)
+
     private fun reconcile(
         incoming: List<File>,
         destinationDir: File,
@@ -190,6 +252,14 @@ class RetroArchSaveBridge @Inject constructor(
     private fun sameContents(a: File, b: File): Boolean =
         b.isFile && a.length() == b.length() && SaveHasher.hashFile(a) == SaveHasher.hashFile(b)
 
+    private fun replaceFile(source: File, destination: File) {
+        destination.parentFile?.mkdirs()
+        if (!source.renameTo(destination)) {
+            source.copyTo(destination, overwrite = true)
+            source.delete()
+        }
+    }
+
     private fun externalRoot(): File =
         externalRootOverride ?: File(Environment.getExternalStorageDirectory(), RETROARCH_DIR)
 
@@ -206,5 +276,6 @@ class RetroArchSaveBridge @Inject constructor(
         private const val RETROARCH_DIR = "RetroArch"
         private const val SAVES_DIR = "saves"
         private const val STATES_DIR = "states"
+        private const val PPSSPP_ARCHIVE_SUFFIX = ".cannoli-ppsspp.zip"
     }
 }

@@ -16,6 +16,7 @@ object StandaloneTitleIdParser {
         StandaloneSaveKind.CEMU -> cemuTitleId(rom)
         StandaloneSaveKind.VITA3K -> vita3kTitleId(rom)
         StandaloneSaveKind.DOLPHIN -> dolphinGameId(rom)
+        StandaloneSaveKind.PPSSPP -> PpssppGameIdParser.gameId(rom)
     }
 
     fun citraTitleId(rom: File): String? = runCatching {

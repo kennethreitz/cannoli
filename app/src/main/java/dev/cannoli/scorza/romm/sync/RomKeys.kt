@@ -12,10 +12,18 @@ object RomKeys {
         val override = platformConfig.getGameOverride(rom.path.absolutePath)
         val standaloneApp = override?.appPackage
             ?: platformConfig.getSelectedStandaloneAppPackage(rom.platformTag)
-        if (standaloneApp != null) return platformConfig.getAppDisplayName(standaloneApp)
+        if (standaloneApp != null) {
+            return STANDALONE_SYNC_IDENTITIES[standaloneApp]
+                ?: platformConfig.getAppDisplayName(standaloneApp)
+        }
         val coreId = override?.coreId?.takeIf { it.isNotEmpty() }
             ?: platformConfig.getCoreName(rom.platformTag)
             ?: return null
         return platformConfig.getCoreDisplayName(coreId)
     }
+
+    private val STANDALONE_SYNC_IDENTITIES = mapOf(
+        "org.ppsspp.ppsspp" to "PPSSPP (Standalone)",
+        "org.ppsspp.ppssppgold" to "PPSSPP (Standalone)",
+    )
 }

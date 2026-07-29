@@ -211,6 +211,7 @@
     <string name="romm_cemu_saves_experimental">Cemu Saves (Experimental)</string>
     <string name="romm_vita3k_saves_experimental">Vita3K Saves (Experimental)</string>
     <string name="romm_dolphin_saves_experimental">Dolphin Saves (Experimental)</string>
+    <string name="romm_ppsspp_saves_experimental">PPSSPP Saves (Experimental)</string>
     <string name="romm_save_folder_connect">Connect</string>
     <string name="romm_save_folder_connected">Connected</string>
     <string name="romm_standalone_saves_connected">%1$s saves connected</string>
