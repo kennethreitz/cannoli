@@ -66,10 +66,16 @@ static unsigned g_frame_height = 0;
 static size_t g_frame_pitch = 0;
 static bool g_frame_ready = false;
 
-// In-memory rewind history. This is deliberately kept on the native side so
-// capturing a state each rendered frame does not create large, short-lived
-// Kotlin ByteArrays or touch the filesystem.
-static std::deque<std::vector<uint8_t>> g_rewind_states;
+// In-memory rewind history. States stay on the native side so capture does not
+// create large, short-lived Kotlin ByteArrays or touch the filesystem. Fast
+// zlib compression makes the configured memory cap describe useful history
+// rather than hundreds of nearly-identical full-memory copies.
+struct RewindState {
+    std::vector<uint8_t> data;
+    size_t raw_size;
+    bool compressed;
+};
+static std::deque<RewindState> g_rewind_states;
 static size_t g_rewind_bytes = 0;
 
 static void clear_rewind_history() {
@@ -886,18 +892,41 @@ JNIEXPORT jint JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCaptureRewindState(
         JNIEnv *, jobject, jint maxBytes) {
     size_t size = core.serialize_size();
-    if (size == 0 || maxBytes <= 0 || size > (size_t)maxBytes) return -1;
+    if (size == 0 || maxBytes <= 0) return -1;
 
-    std::vector<uint8_t> state(size);
-    if (!core.serialize(state.data(), size)) return 0;
+    std::vector<uint8_t> raw(size);
+    if (!core.serialize(raw.data(), size)) return 0;
+
+    uLongf compressed_size = compressBound((uLong)size);
+    std::vector<uint8_t> compressed(compressed_size);
+    int z_result = compress2(
+            compressed.data(),
+            &compressed_size,
+            raw.data(),
+            (uLong)size,
+            Z_BEST_SPEED);
+
+    RewindState state;
+    state.raw_size = size;
+    if (z_result == Z_OK && compressed_size < size) {
+        compressed.resize(compressed_size);
+        state.data = std::move(compressed);
+        state.compressed = true;
+    } else {
+        state.data = std::move(raw);
+        state.compressed = false;
+    }
+
+    const size_t stored_size = state.data.size();
+    if (stored_size > (size_t)maxBytes) return -1;
 
     while (!g_rewind_states.empty() &&
-           g_rewind_bytes + size > (size_t)maxBytes) {
-        g_rewind_bytes -= g_rewind_states.front().size();
+           g_rewind_bytes + stored_size > (size_t)maxBytes) {
+        g_rewind_bytes -= g_rewind_states.front().data.size();
         g_rewind_states.pop_front();
     }
 
-    g_rewind_bytes += size;
+    g_rewind_bytes += stored_size;
     g_rewind_states.push_back(std::move(state));
     return 1;
 }
@@ -907,16 +936,31 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeRewind(
         JNIEnv *, jobject, jint steps) {
     if (steps <= 0 || g_rewind_states.empty()) return 0;
 
-    std::vector<uint8_t> target;
+    RewindState target;
     jint restoredSteps = 0;
     while (restoredSteps < steps && !g_rewind_states.empty()) {
         target = std::move(g_rewind_states.back());
-        g_rewind_bytes -= target.size();
+        g_rewind_bytes -= target.data.size();
         g_rewind_states.pop_back();
         restoredSteps++;
     }
 
-    if (target.empty() || !core.unserialize(target.data(), target.size())) return -1;
+    if (target.data.empty()) return -1;
+    if (target.compressed) {
+        std::vector<uint8_t> raw(target.raw_size);
+        uLongf raw_size = (uLongf)target.raw_size;
+        if (uncompress(
+                raw.data(),
+                &raw_size,
+                target.data.data(),
+                (uLong)target.data.size()) != Z_OK ||
+            raw_size != target.raw_size ||
+            !core.unserialize(raw.data(), target.raw_size)) {
+            return -1;
+        }
+    } else if (!core.unserialize(target.data.data(), target.raw_size)) {
+        return -1;
+    }
     return restoredSteps;
 }
 

@@ -63,6 +63,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     @Volatile private var overlayDirty = false
     @Volatile private var pipelineDirty = false
     @Volatile private var rewindClearRequested = false
+    private val rewindCadence = RewindCadence()
     private var pipeline: ShaderPipeline? = null
     private var pipelineWarmedUp = false
     private var overlayTextureId = 0
@@ -220,6 +221,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
         if (rewindClearRequested) {
             rewindClearRequested = false
             runner.clearRewindHistory()
+            rewindCadence.reset()
         }
         if (!paused) {
             val now = System.nanoTime()
@@ -227,7 +229,8 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
             lastDrawNanos = now
 
             if (rewindEnabled && rewinding) {
-                val result = runner.rewind(rewindFrames.coerceAtLeast(1))
+                val states = rewindCadence.statesForRewindTick(rewindFrames)
+                val result = if (states > 0) runner.rewind(states) else 0
                 rewindHistoryAvailable = runner.getRewindStateCount() > 0
                 if (result > 0) {
                     // Unserializing restores core state but does not invoke the video
@@ -241,9 +244,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
             } else {
                 val extra = fastForwardFrames
                 if (extra > 0) {
-                    captureRewindState()
-                    runEmulatedFrame()
-                    repeat(extra - 1) { runEmulatedFrame() }
+                    repeat(extra) { runForwardFrame() }
                 } else if (lockedToVsync) {
                     val frameDurationNs = (1_000_000_000.0 / coreTargetFps).toLong()
                     if (lockedPacer.shouldRunFrame(delta, frameDurationNs)) runForwardFrame()
@@ -425,6 +426,7 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
 
     private fun captureRewindState() {
         if (!rewindEnabled || !rewindSupported) return
+        if (!rewindCadence.shouldCaptureForwardFrame()) return
         when (runner.captureRewindState(rewindMemoryMb * BYTES_PER_MEGABYTE)) {
             1 -> rewindHistoryAvailable = true
             -1 -> {
