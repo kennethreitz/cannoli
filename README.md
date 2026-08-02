@@ -56,6 +56,15 @@ Since purchasing a Retroid Pocket Classic I've been yearning for MinUI's simplic
 
 ---
 
+# Save Interoperability
+
+Cannoli's portable RomM save-bundle format is documented in
+[docs/romm-save-bundles.md](docs/romm-save-bundles.md). Clients that edit these
+saves should preserve the bundle representation so the same save can move
+between Cannoli, RetroVault, and RomM without a format migration.
+
+---
+
 # Spread Joy!
 
 I've spent a lot of time building Cannoli.
