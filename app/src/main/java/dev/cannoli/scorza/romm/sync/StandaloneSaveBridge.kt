@@ -738,6 +738,10 @@ class StandaloneSaveBridge @Inject constructor(
         expectedKind: StandaloneSaveKind,
         expectedTitleId: String,
     ) {
+        if (expectedKind == StandaloneSaveKind.CEMU) {
+            CemuSaveBundle.extractAndValidate(archive, stage, expectedTitleId)
+            return
+        }
         var entryCount = 0
         var extractedBytes = 0L
         var manifestText: String? = null
