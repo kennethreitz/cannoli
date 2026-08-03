@@ -17,6 +17,7 @@ data class LocalSave(
 enum class LocalSaveMode {
     NORMAL,
     STANDALONE_ARCHIVE,
+    VITA3K_DIRECTORY_ARCHIVE,
     PPSSPP_DIRECTORY_ARCHIVE,
 }
 
@@ -58,6 +59,7 @@ class LocalSaveResolver(private val cannoliRoot: File) {
             contentHash = hash,
             uploadFileName = when {
                 mode == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE -> "$base.ppsspp.zip"
+                mode == LocalSaveMode.VITA3K_DIRECTORY_ARCHIVE -> "$base.vita3k.zip"
                 isBundle || mode == LocalSaveMode.STANDALONE_ARCHIVE -> "$base.zip"
                 else -> "$base.srm"
             },
@@ -149,6 +151,7 @@ class LocalSaveResolver(private val cannoliRoot: File) {
     private fun archiveFileName(base: String, mode: LocalSaveMode): String? = when (mode) {
         LocalSaveMode.NORMAL -> null
         LocalSaveMode.STANDALONE_ARCHIVE -> "$base.cannoli-standalone.zip"
+        LocalSaveMode.VITA3K_DIRECTORY_ARCHIVE -> "$base.cannoli-standalone.zip"
         LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE -> "$base.cannoli-ppsspp.zip"
     }
 }

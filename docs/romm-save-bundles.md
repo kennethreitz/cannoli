@@ -38,6 +38,35 @@ mlc01/usr/save/00050000/10145c00/
 
 and the contents of that directory become the archive's `save/` tree.
 
+## Vita3K
+
+A portable Vita3K save uses the same marker plus `save/` structure:
+
+```text
+cannoli-standalone-save.txt
+save/
+  ...the contents of ux0/user/00/savedata/<title-id>/...
+```
+
+For Super Stardust Delta, the marker is:
+
+```ini
+format=1
+emulator=VITA3K
+title_id=PCSA00006
+```
+
+Cannoli also accepts two representations used by RetroVault and Vita3K tools:
+
+- a ZIP rooted directly at the selected title's save directory; and
+- a native ZIP rooted at `ux0/user/00/savedata/<title-id>/` (optionally below
+  a leading `vita/` directory).
+
+Native multi-title exports are filtered to the title associated with the RomM
+game. Direct bundles rely on that RomM game association because they contain
+no title identifier. Paths, entry counts, expanded size, portable markers, and
+native title IDs are validated before Cannoli replaces Vita3K's live save.
+
 ## Round-trip preservation
 
 A client may translate the portable tree into its native emulator layout while
