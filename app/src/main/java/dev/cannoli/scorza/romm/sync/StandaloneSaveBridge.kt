@@ -193,6 +193,7 @@ class StandaloneSaveBridge @Inject constructor(
     fun archiveMode(kind: StandaloneSaveKind?): LocalSaveMode = when (kind) {
         null -> LocalSaveMode.NORMAL
         StandaloneSaveKind.PPSSPP -> LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE
+        StandaloneSaveKind.VITA3K -> LocalSaveMode.VITA3K_DIRECTORY_ARCHIVE
         else -> LocalSaveMode.STANDALONE_ARCHIVE
     }
 
@@ -740,6 +741,10 @@ class StandaloneSaveBridge @Inject constructor(
     ) {
         if (expectedKind == StandaloneSaveKind.CEMU) {
             CemuSaveBundle.extractAndValidate(archive, stage, expectedTitleId)
+            return
+        }
+        if (expectedKind == StandaloneSaveKind.VITA3K) {
+            Vita3KSaveBundle.extractAndValidate(archive, stage, expectedTitleId)
             return
         }
         var entryCount = 0

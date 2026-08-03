@@ -163,4 +163,19 @@ class LocalSaveResolverTest {
         )
         assertNull(resolver.resolve("PSP", "LocoRoco"))
     }
+
+    @Test fun vita3k_directory_bundle_uses_interoperable_upload_name() {
+        val archive = File(saves("PSVITA"), "Super Stardust Delta.cannoli-standalone.zip")
+            .apply { writeBytes("VITA-SAVE".toByteArray()) }
+        val resolver = LocalSaveResolver(tmp.root)
+
+        val save = resolver.resolve(
+            "PSVITA",
+            "Super Stardust Delta",
+            LocalSaveMode.VITA3K_DIRECTORY_ARCHIVE,
+        )!!
+
+        assertEquals(listOf(archive), save.files)
+        assertEquals("Super Stardust Delta.vita3k.zip", save.uploadFileName)
+    }
 }
