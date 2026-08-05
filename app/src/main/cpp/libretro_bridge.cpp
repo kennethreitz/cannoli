@@ -7,7 +7,10 @@
 #include <map>
 #include <vector>
 #include <deque>
+#include <condition_variable>
+#include <cstdint>
 #include <mutex>
+#include <thread>
 #include <android/log.h>
 #include <zlib.h>
 #include "libretro.h"
@@ -66,21 +69,120 @@ static unsigned g_frame_height = 0;
 static size_t g_frame_pitch = 0;
 static bool g_frame_ready = false;
 
-// In-memory rewind history. States stay on the native side so capture does not
-// create large, short-lived Kotlin ByteArrays or touch the filesystem. Fast
-// zlib compression makes the configured memory cap describe useful history
-// rather than hundreds of nearly-identical full-memory copies.
+// In-memory rewind history. Core serialization remains on the emulation thread,
+// but compression is handed to a bounded worker so a multi-megabyte state cannot
+// block a vsync and starve audio. States stay native to avoid large, short-lived
+// Kotlin ByteArrays and filesystem traffic.
 struct RewindState {
     std::vector<uint8_t> data;
     size_t raw_size;
     bool compressed;
 };
+
+struct PendingRewindState {
+    std::vector<uint8_t> raw;
+    size_t max_bytes;
+    uint64_t generation;
+};
+
 static std::deque<RewindState> g_rewind_states;
+static std::deque<PendingRewindState> g_pending_rewind_states;
 static size_t g_rewind_bytes = 0;
+static std::mutex g_rewind_mutex;
+static std::condition_variable g_rewind_cv;
+static std::thread g_rewind_worker;
+static bool g_rewind_worker_stop = false;
+static bool g_rewind_worker_failed = false;
+static uint64_t g_rewind_generation = 0;
+
+// A PSX state is roughly 4.5 MB. Bounding the pending queue prevents a slow
+// compressor from turning a temporary stall into unbounded native memory use.
+static constexpr size_t MAX_PENDING_REWIND_STATES = 2;
+
+static RewindState compress_rewind_state(std::vector<uint8_t> raw) {
+    uLongf compressed_size = compressBound((uLong)raw.size());
+    std::vector<uint8_t> compressed(compressed_size);
+    int z_result = compress2(
+            compressed.data(),
+            &compressed_size,
+            raw.data(),
+            (uLong)raw.size(),
+            Z_BEST_SPEED);
+
+    RewindState state;
+    state.raw_size = raw.size();
+    if (z_result == Z_OK && compressed_size < raw.size()) {
+        compressed.resize(compressed_size);
+        state.data = std::move(compressed);
+        state.compressed = true;
+    } else {
+        state.data = std::move(raw);
+        state.compressed = false;
+    }
+    return state;
+}
+
+static void rewind_compression_loop() {
+    while (true) {
+        PendingRewindState pending;
+        {
+            std::unique_lock<std::mutex> lock(g_rewind_mutex);
+            g_rewind_cv.wait(lock, [] {
+                return g_rewind_worker_stop || !g_pending_rewind_states.empty();
+            });
+            if (g_rewind_worker_stop) return;
+            pending = std::move(g_pending_rewind_states.front());
+            g_pending_rewind_states.pop_front();
+        }
+
+        RewindState state = compress_rewind_state(std::move(pending.raw));
+        const size_t stored_size = state.data.size();
+
+        std::lock_guard<std::mutex> lock(g_rewind_mutex);
+        if (g_rewind_worker_stop || pending.generation != g_rewind_generation) {
+            continue;
+        }
+        if (stored_size > pending.max_bytes) {
+            g_rewind_worker_failed = true;
+            continue;
+        }
+        while (!g_rewind_states.empty() &&
+               g_rewind_bytes + stored_size > pending.max_bytes) {
+            g_rewind_bytes -= g_rewind_states.front().data.size();
+            g_rewind_states.pop_front();
+        }
+        g_rewind_bytes += stored_size;
+        g_rewind_states.push_back(std::move(state));
+    }
+}
+
+static void ensure_rewind_worker_locked() {
+    if (g_rewind_worker.joinable()) return;
+    g_rewind_worker_stop = false;
+    g_rewind_worker = std::thread(rewind_compression_loop);
+}
 
 static void clear_rewind_history() {
+    std::lock_guard<std::mutex> lock(g_rewind_mutex);
+    ++g_rewind_generation;
     g_rewind_states.clear();
+    g_pending_rewind_states.clear();
     g_rewind_bytes = 0;
+    g_rewind_worker_failed = false;
+}
+
+static void stop_rewind_worker() {
+    {
+        std::lock_guard<std::mutex> lock(g_rewind_mutex);
+        ++g_rewind_generation;
+        g_rewind_states.clear();
+        g_pending_rewind_states.clear();
+        g_rewind_bytes = 0;
+        g_rewind_worker_failed = false;
+        g_rewind_worker_stop = true;
+    }
+    g_rewind_cv.notify_all();
+    if (g_rewind_worker.joinable()) g_rewind_worker.join();
 }
 
 static JavaVM *g_jvm = nullptr;
@@ -558,6 +660,10 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
     return JNI_VERSION_1_6;
 }
 
+JNIEXPORT void JNI_OnUnload(JavaVM *, void *) {
+    stop_rewind_worker();
+}
+
 JNIEXPORT jboolean JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeLoadCore(JNIEnv *env, jobject, jstring corePath) {
     // Full reset of all bridge state so each core load starts from a clean slate,
@@ -894,55 +1000,58 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeCaptureRewindState(
     size_t size = core.serialize_size();
     if (size == 0 || maxBytes <= 0) return -1;
 
+    uint64_t generation;
+    {
+        std::lock_guard<std::mutex> lock(g_rewind_mutex);
+        if (g_rewind_worker_failed) return -1;
+        ensure_rewind_worker_locked();
+        if (g_pending_rewind_states.size() >= MAX_PENDING_REWIND_STATES) {
+            return 0;
+        }
+        generation = g_rewind_generation;
+    }
+
     std::vector<uint8_t> raw(size);
     if (!core.serialize(raw.data(), size)) return 0;
 
-    uLongf compressed_size = compressBound((uLong)size);
-    std::vector<uint8_t> compressed(compressed_size);
-    int z_result = compress2(
-            compressed.data(),
-            &compressed_size,
-            raw.data(),
-            (uLong)size,
-            Z_BEST_SPEED);
-
-    RewindState state;
-    state.raw_size = size;
-    if (z_result == Z_OK && compressed_size < size) {
-        compressed.resize(compressed_size);
-        state.data = std::move(compressed);
-        state.compressed = true;
-    } else {
-        state.data = std::move(raw);
-        state.compressed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_rewind_mutex);
+        if (g_rewind_worker_failed) return -1;
+        if (generation != g_rewind_generation) return 0;
+        if (g_pending_rewind_states.size() >= MAX_PENDING_REWIND_STATES) {
+            return 0; // Preserve gameplay timing; a sparse rewind point is preferable.
+        }
+        g_pending_rewind_states.push_back({
+                std::move(raw),
+                (size_t)maxBytes,
+                generation,
+        });
     }
-
-    const size_t stored_size = state.data.size();
-    if (stored_size > (size_t)maxBytes) return -1;
-
-    while (!g_rewind_states.empty() &&
-           g_rewind_bytes + stored_size > (size_t)maxBytes) {
-        g_rewind_bytes -= g_rewind_states.front().data.size();
-        g_rewind_states.pop_front();
-    }
-
-    g_rewind_bytes += stored_size;
-    g_rewind_states.push_back(std::move(state));
+    g_rewind_cv.notify_one();
     return 1;
 }
 
 JNIEXPORT jint JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeRewind(
         JNIEnv *, jobject, jint steps) {
-    if (steps <= 0 || g_rewind_states.empty()) return 0;
+    if (steps <= 0) return 0;
 
     RewindState target;
     jint restoredSteps = 0;
-    while (restoredSteps < steps && !g_rewind_states.empty()) {
-        target = std::move(g_rewind_states.back());
-        g_rewind_bytes -= target.data.size();
-        g_rewind_states.pop_back();
-        restoredSteps++;
+    {
+        std::lock_guard<std::mutex> lock(g_rewind_mutex);
+        if (g_rewind_states.empty()) return 0;
+
+        // Compression may still be finishing a newer point from the timeline
+        // we are about to abandon. Invalidate it before popping history.
+        ++g_rewind_generation;
+        g_pending_rewind_states.clear();
+        while (restoredSteps < steps && !g_rewind_states.empty()) {
+            target = std::move(g_rewind_states.back());
+            g_rewind_bytes -= target.data.size();
+            g_rewind_states.pop_back();
+            restoredSteps++;
+        }
     }
 
     if (target.data.empty()) return -1;
@@ -967,6 +1076,7 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeRewind(
 JNIEXPORT jint JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeGetRewindStateCount(
         JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> lock(g_rewind_mutex);
     return (jint)g_rewind_states.size();
 }
 
@@ -1207,7 +1317,7 @@ Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeUnloadGame(JNIEnv *, jobje
 
 JNIEXPORT void JNICALL
 Java_dev_cannoli_scorza_libretro_LibretroRunner_nativeDeinit(JNIEnv *env, jobject) {
-    clear_rewind_history();
+    stop_rewind_worker();
     core.deinit();
     if (core.handle) {
         dlclose(core.handle);
