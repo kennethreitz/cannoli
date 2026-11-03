@@ -26,8 +26,14 @@ class RomScanner(
         val tag = platformTag.uppercase()
         ensurePlatformRow(tag)
         walker.invalidateCategoryFolders(tag)
-        val result = walker.walk(tag, isArcade) ?: return clearPlatform(tag).also {
-            ScanLog.write("scanPlatform $tag: no rom dir, cleared ${it.removed}")
+        val result = walker.walk(tag, isArcade) ?: run {
+            if (!walker.romRootAvailable()) {
+                ScanLog.write("scanPlatform $tag: rom root unavailable, kept existing rows")
+                return SyncCounts(0, 0, 0)
+            }
+            return clearPlatform(tag).also {
+                ScanLog.write("scanPlatform $tag: no rom dir, cleared ${it.removed}")
+            }
         }
         applyRekeys(tag, result.rekeys)
         artwork.invalidate(tag)
