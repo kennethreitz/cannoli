@@ -198,6 +198,21 @@ class RomDirectoryWalkerTest {
     }
 
     @Test
+    fun `renaming a pico-8 cart keeps the p8 extension`() {
+        write("PICO/Celeste.p8.png", "cart")
+        val cart = File(romsDir, "PICO/Celeste.p8.png")
+
+        val result = walker.renameGame(cart, "Celeste Classic")
+
+        assertEquals(RomDirectoryWalker.RenameOutcome.RENAMED, result.outcome)
+        val renamed = File(romsDir, "PICO/Celeste Classic.p8.png")
+        assertTrue(renamed.exists())
+        assertEquals(renamed, result.newPrimary)
+        assertEquals(RomDirectoryWalker.RenameOutcome.RENAMED, walker.renameGame(renamed, "Celeste Classic").outcome)
+        assertTrue(renamed.exists())
+    }
+
+    @Test
     fun `renaming a multi-disc folder game cascades to all files`() {
         write("PS/Cool Game (Disc 1).chd")
         write("PS/Cool Game (Disc 2).chd")

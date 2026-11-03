@@ -140,11 +140,12 @@ class RomDirectoryWalker(
 
         val dir = gameDirectory(primaryFile)
         if (dir == null) {
-            val currentBase = primaryFile.nameWithoutExtension
+            val isPico = primaryFile.name.endsWith(".p8.png", ignoreCase = true)
+            val currentBase = if (isPico) primaryFile.name.dropLast(".p8.png".length) else primaryFile.nameWithoutExtension
             if (newName.equals(currentBase, ignoreCase = true)) {
                 return RenameGameResult(RenameOutcome.RENAMED, primaryFile)
             }
-            val ext = primaryFile.extension
+            val ext = if (isPico) primaryFile.name.takeLast("p8.png".length) else primaryFile.extension
             val target = File(primaryFile.parentFile, if (ext.isEmpty()) newName else "$newName.$ext")
             if (target.exists()) return RenameGameResult(RenameOutcome.NAME_TAKEN)
             return if (primaryFile.renameTo(target)) {
