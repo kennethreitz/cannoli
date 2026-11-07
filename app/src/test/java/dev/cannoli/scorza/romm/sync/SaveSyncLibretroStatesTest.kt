@@ -34,6 +34,7 @@ class SaveSyncLibretroStatesTest {
 
     private lateinit var service: SaveSyncService
     private lateinit var client: RommClient
+    private lateinit var bridge: LibretroStateBridge
     private lateinit var stateSlot: String
     private lateinit var stateFile: File
 

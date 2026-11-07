@@ -6,6 +6,7 @@ import dev.cannoli.scorza.config.EmulatorSource
 import dev.cannoli.scorza.config.PlatformConfig
 import dev.cannoli.scorza.db.GameOverrideStore
 import dev.cannoli.scorza.db.RomsRepository
+import io.mockk.every
 import io.mockk.mockk
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.launcher.LaunchState
@@ -53,10 +54,14 @@ class RetroArchSaveBridgeTest {
             parentFile?.mkdirs()
             writeText("ROM")
         }
+        val roms = mockk<RomsRepository>()
+        every { roms.romIdForRelativePath(any()) } returns null
+        val gameOverrides = mockk<GameOverrideStore>()
+        every { gameOverrides.get(any()) } returns null
         bridge = RetroArchSaveBridge(
             context, settings, paths, config, LaunchState(),
-            roms = mockk<RomsRepository>(relaxed = true),
-            gameOverrides = mockk<GameOverrideStore>(relaxed = true),
+            roms = roms,
+            gameOverrides = gameOverrides,
         ).apply {
             externalRootOverride = external
             storageAccessOverride = true

@@ -1494,10 +1494,9 @@ class SaveSyncService(
                 val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
                 return plan(action, downloadOp = op)
             }
-            // The batch response is authoritative for a first-time pull. Only make a per-ROM
-            // fallback request when Cannoli has an anchor: RomM intentionally omits an unchanged
-            // server save after a client deletion, while Cannoli's policy is to regenerate it.
-            if (s.anchor == null) return plan(SweepAction.NO_SAVE)
+            // The batch did not name a download. A missing local file still pulls the server
+            // head, including a first sync that has never written an anchor. headSaveFor picks
+            // the newest row rather than whichever save RomM listed first.
             val serverSaves = try {
                 client.getSaves(s.romId, deviceId).also { onReach(true) }
             } catch (t: Throwable) {
@@ -1506,7 +1505,8 @@ class SaveSyncService(
             }
             val save = headSaveFor(serverSaves, s.slot, saveMode(s.tag, s.emulator))
                 ?: return plan(SweepAction.NO_SAVE)
-            return plan(SweepAction.REGENERATE, downloadOp = downloadOpFor(save, s.romId, s.slot))
+            val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
+            return plan(action, downloadOp = downloadOpFor(save, s.romId, s.slot))
         }
         promotions.get(s.gameKey, s.slot)?.let { return plan(SweepAction.PROMOTE, promotion = it) }
         if (batchFailed) return plan(SweepAction.UNREACHABLE)

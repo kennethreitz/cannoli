@@ -56,7 +56,7 @@ class PlatformConfigSourcesTest {
 
     @Test fun `a reported core stays available even while the package cannot report others`() {
         val pc = config()
-        val candidate = "nestopia_libretro"
+        val candidate = "fceumm_libretro"
         val options = pc.emulatorOptionsForSource(
             "NES", EmulatorSource.RetroArch, includeAll = false,
             installedRaCores = mapOf("com.retroarch" to setOf(candidate)),
