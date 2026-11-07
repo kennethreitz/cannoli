@@ -48,6 +48,8 @@ class OverrideManagerTest {
         assertEquals(ScreenEffect.NONE, s.screenEffect)
         assertEquals(Sharpness.SHARP, s.sharpness)
         assertEquals(4, s.maxFfSpeed)
+        assertEquals(4, s.maxRewindSpeed)
+        assertEquals(256, s.rewindMemoryMb)
         assertEquals("", s.shaderPreset)
         assertTrue(s.coreOptions.isEmpty())
         assertTrue(s.shaderParams.isEmpty())
@@ -62,6 +64,8 @@ class OverrideManagerTest {
             scaling=FULLSCREEN
             sharpness=SOFT
             max_ff_speed=8
+            max_rewind_speed=6
+            rewind_memory_mb=512
             crt_curvature=2.0
             shader_preset=foo.glslp
             """
@@ -70,6 +74,8 @@ class OverrideManagerTest {
         assertEquals(ScalingMode.FULLSCREEN, s.scalingMode)
         assertEquals(Sharpness.SOFT, s.sharpness)
         assertEquals(8, s.maxFfSpeed)
+        assertEquals(6, s.maxRewindSpeed)
+        assertEquals(512, s.rewindMemoryMb)
         assertEquals(2f, s.crtCurvature, 0f)
         assertEquals("foo.glslp", s.shaderPreset)
     }
@@ -94,6 +100,18 @@ class OverrideManagerTest {
         assertEquals(ScalingMode.INTEGER, s.scalingMode)
         // Untouched fields fall back to platform
         assertEquals(8, s.maxFfSpeed)
+    }
+
+    @Test fun `unsupported rewind memory override falls back to safe default`() {
+        writePlatformIni(
+            "PS",
+            """
+            [frontend]
+            rewind_memory_mb=9999
+            """
+        )
+
+        assertEquals(256, manager().load().rewindMemoryMb)
     }
 
     @Test fun `core options merge across platform and game`() {
@@ -211,6 +229,7 @@ class OverrideManagerTest {
         assertEquals("INTEGER", parsed.get("frontend", "scaling"))
         assertEquals("SHADER", parsed.get("frontend", "effect"))
         assertEquals("crt-cannoli.glslp", parsed.get("frontend", "shader_preset"))
+        assertEquals("4", parsed.get("frontend", "max_rewind_speed"))
         assertEquals("Hardware", parsed.get("options", "swanstation_GPU_Renderer"))
         assertEquals("0.7", parsed.get("shader_params", "strength"))
     }

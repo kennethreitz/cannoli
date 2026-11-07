@@ -366,6 +366,18 @@ class PlatformConfig(
     fun getUserAppMapping(tag: String): String? =
         userChoices[tag]?.takeIf { it.source == EmulatorSource.Standalone }?.appPackage
 
+    fun getSelectedStandaloneAppPackage(tag: String): String? {
+        userChoices[tag]?.let { choice ->
+            return if (choice.source == EmulatorSource.Standalone) choice.appPackage else null
+        }
+        // No stored choice: a platform that has only a standalone app (no core) still
+        // identifies as that app. A platform with a core does not.
+        return getAppPackage(tag).takeIf { getCoreName(tag).isNullOrBlank() }
+    }
+
+    fun getAppDisplayName(packageName: String): String =
+        knownAppLabels[packageName] ?: packageName
+
     fun getAppOptions(tag: String): List<AppConfig> = defaultApps[tag.uppercase()] ?: emptyList()
 
     fun getAppConfig(tag: String, packageName: String): AppConfig {
@@ -645,6 +657,7 @@ class PlatformConfig(
         "dev.cannoli.delfino" to "Delfino",
         "dev.cannoli.delfino.debug" to "Delfino (Debug)",
         "org.azahar_emu.azahar" to "Azahar",
+        "org.citra.emu" to "Citra MMJ",
         "info.cemu.cemu" to "Cemu",
         "org.vita3k.emulator" to "Vita3K",
         "aenu.aps3e" to "aPS3e",

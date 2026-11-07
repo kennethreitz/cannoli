@@ -3,6 +3,7 @@ package dev.cannoli.scorza.libretro
 import android.app.UiModeManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.Bundle
@@ -44,6 +45,7 @@ import dev.cannoli.igm.IgmMenuAction
 import dev.cannoli.igm.InGameMenuOptions
 import dev.cannoli.igm.ProviderSettingsController
 import dev.cannoli.igm.ShortcutAction
+import dev.cannoli.igm.availableShortcutActions
 import dev.cannoli.scorza.R
 import dev.cannoli.scorza.libretro.settings.LauncherIgmSettingsProvider
 import dev.cannoli.scorza.libretro.settings.LauncherSettingsHost
@@ -87,6 +89,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     @Inject lateinit var activeMappingHolder: dev.cannoli.scorza.input.runtime.ActiveMappingHolder
     @Inject lateinit var controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
     @Inject lateinit var bindingController: dev.cannoli.scorza.input.BindingController
+    @Inject lateinit var launchState: dev.cannoli.scorza.launcher.LaunchState
 
     private lateinit var runner: LibretroRunner
     private lateinit var renderer: LibretroRenderer
@@ -150,6 +153,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var missingBios by mutableStateOf<List<dev.cannoli.scorza.config.FirmwareEntry>>(emptyList())
 
     private val screenStack = mutableStateListOf<IGMScreen>()
+    private var inputActivityResumed = false
 
     private var selectedSlotIndex by mutableIntStateOf(0)
     private var slotThumbnail by mutableStateOf<Bitmap?>(null)
@@ -165,6 +169,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var showFps by mutableStateOf(false)
     override var showFpsBaseline by mutableStateOf(false)
     override var maxFfSpeed by mutableIntStateOf(4)
+    override var maxRewindSpeed by mutableIntStateOf(4)
+    override var rewindMemoryMb by mutableIntStateOf(DEFAULT_REWIND_MEMORY_MB)
     private var overlay by mutableStateOf("")
     private var overlayImages = emptyList<String>()
 
@@ -187,6 +193,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     // A launcher setting, so it cannot change while a game is running. Read once.
     override val experimentalFeatures: Boolean by lazy { settings.experimentalFeatures }
+    override val rewindFeatureEnabled: Boolean by lazy {
+        experimentalFeatures && settings.rewindEnabled
+    }
 
     override var allowDiagonals by mutableStateOf(true)
 
@@ -238,8 +247,14 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     }
 
     private var audioSampleRate = 0
+    private val useSoftwareVolumeWorkaround: Boolean by lazy {
+        LibretroVolumeWorkaround.applies(Build.MANUFACTURER.orEmpty(), Build.MODEL.orEmpty())
+    }
+    private var lastSoftwareVolumeIndex = -1
     private var fastForwarding by mutableStateOf(false)
     private var holdingFf = false
+    private var rewinding by mutableStateOf(false)
+    private var holdingRewind = false
 
     private val pendingHoldHandler = Handler(Looper.getMainLooper())
     private val pendingHoldRunnable = Runnable { firePendingHold() }
@@ -255,10 +270,46 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
     }
 
+    private fun syncSoftwareVolume() {
+        if (!useSoftwareVolumeWorkaround || !::runner.isInitialized) return
+        val audioManager = getSystemService(AudioManager::class.java)
+        val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        runner.setAudioVolume(LibretroVolumeWorkaround.gain(volume, maxVolume))
+        if (volume != lastSoftwareVolumeIndex) {
+            lastSoftwareVolumeIndex = volume
+            if (::sessionLog.isInitialized) {
+                sessionLog.log("audio software volume: index=$volume max=$maxVolume")
+            }
+        }
+    }
+
+    private fun scheduleSoftwareVolumeSync() {
+        // AudioService applies hardware-key changes just after PhoneWindow returns. A short
+        // delayed read avoids mirroring the previous index (most importantly, 1 instead of 0).
+        if (useSoftwareVolumeWorkaround) {
+            audioStatsHandler.postDelayed({ syncSoftwareVolume() }, 75L)
+        }
+    }
+
     private fun setFastForward(enabled: Boolean) {
+        if (enabled && rewinding) setRewind(false)
         fastForwarding = enabled
         renderer.fastForwardFrames = if (enabled) maxFfSpeed else 0
-        runner.setAudioMuted(enabled)
+        runner.setAudioMuted(enabled || rewinding)
+    }
+
+    private fun setRewind(enabled: Boolean) {
+        if (enabled && !rewindFeatureEnabled) return
+        if (enabled && fastForwarding) setFastForward(false)
+        rewinding = enabled
+        renderer.rewinding = enabled
+        renderer.rewindFrames = maxRewindSpeed
+        runner.setAudioMuted(enabled || fastForwarding)
+    }
+
+    private fun invalidateRewindHistory() {
+        if (::renderer.isInitialized) renderer.clearRewindHistory()
     }
 
     private fun performSaveAndQuit() {
@@ -332,6 +383,14 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private var gameBaseName: String = ""
     override var platformName: String = ""
     private var cannoliRoot: String = ""
+    private var trackSotnMap = false
+    private var trackAriaOfSorrowMap = false
+    private var trackMetroidGbaMap = false
+    private var trackPokemonFireEmerald = false
+    private var trackSuperMarioWorld = false
+    private var trackUniversalCompanion = false
+    private var companionFrame = 0
+    private var universalCompanionFrame = 0
 
     private val currentSlot get() = slotManager.slots[selectedSlotIndex]
     private val currentScreen get() = screenStack.lastOrNull()
@@ -429,6 +488,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         private const val LOG_FLUSH_TIMEOUT_MS = 250L
 
         private val FF_SPEEDS = listOf(2, 3, 4, 6, 8)
+        private val REWIND_SPEEDS = listOf(1, 2, 3, 4, 6, 8)
 
         // Substrings (lowercase) matched against "<key> <desc>" for cores declaring hw_render=true.
         // These options only take effect with a hardware GL/Vulkan context, which the built-in
@@ -460,6 +520,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         )
         private const val TRIGGER_PRESS_THRESHOLD = 0.5f
         private const val TRIGGER_RELEASE_THRESHOLD = 0.3f
+        private const val COMPANION_POLL_FRAMES = 15
+        private const val UNIVERSAL_COMPANION_POLL_FRAMES = 60
         @Volatile var isRunning = false
 
         // Last-resort keycode -> nav button mapping for IGM nav, used only when the device
@@ -484,10 +546,14 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         )
     }
 
-    private fun push(screen: IGMScreen) { screenStack.add(screen) }
+    private fun push(screen: IGMScreen) {
+        screenStack.add(screen)
+        syncMenuNavigationPolling()
+    }
 
     private fun pop() {
         if (screenStack.isNotEmpty()) screenStack.removeAt(screenStack.lastIndex)
+        syncMenuNavigationPolling()
     }
 
     private fun replaceTop(screen: IGMScreen) {
@@ -566,10 +632,21 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Dual-display focus can make Android infer the launcher/system stream for hardware
+        // volume keys. Libretro audio is media, so keep this Activity explicitly bound to it.
+        volumeControlStream = AudioManager.STREAM_MUSIC
+
         val args = dev.cannoli.scorza.launcher.LaunchArgs.from(intent) ?: run { finish(); return }
         gameTitle = args.gameTitle.removePrefix("$STAR ")
         corePath = args.corePath
         romPath = args.romPath
+        trackSotnMap = SotnMapReader.matches(gameTitle, romPath)
+        trackAriaOfSorrowMap = AriaOfSorrowMapReader.matches(gameTitle, romPath)
+        trackMetroidGbaMap = MetroidGbaMapReader.matches(gameTitle, romPath)
+        trackPokemonFireEmerald = PokemonFireEmeraldReader.matches(gameTitle, romPath)
+        trackSuperMarioWorld = SuperMarioWorldReader.matches(gameTitle, romPath)
+        trackUniversalCompanion =
+            settings.experimentalFeatures && settings.universalCompanionDeck
         originalRomPath = args.originalRomPath
         sramPath = args.sramPath
         stateBasePath = args.statePath
@@ -697,6 +774,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                                 audioSampleRate = audioSampleRate,
                                 osdController = osdController,
                                 fastForwarding = fastForwarding,
+                                rewinding = rewinding,
                                 settings = settings,
                                 guideFiles = guideFiles,
                                 cheatSections = cheatSections,
@@ -825,6 +903,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 audioSampleRate = avInfo.sampleRate
                 sessionLog.log("audio init: requested sampleRate=${avInfo.sampleRate}")
                 runner.initAudio(avInfo.sampleRate, avInfo.fps)
+                syncSoftwareVolume()
                 runner.setAudioMuted(true)
                 if (dev.cannoli.scorza.util.LoggingPrefs.session) {
                     sessionLog.log("audio ${runner.getAudioDiagnostics()}")
@@ -840,6 +919,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     backend.sharpness = sharpness
                     backend.screenEffect = screenEffect
                     backend.debugHud = debugHud
+                    backend.rewindEnabled = rewindFeatureEnabled
+                    backend.rewindFrames = maxRewindSpeed
+                    backend.rewindMemoryMb = rewindMemoryMb
                     backend.overlayPath = resolveOverlayPath()
                     backend.shaderPresetPath = resolveShaderPresetPath()
                     backend.portraitMarginPx = settings.portraitMarginPx
@@ -856,6 +938,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     ShaderPipeline.logger = { msg -> sessionLog.log(msg) }
                 }
                 configureBackend(glesBackend)
+                sessionLog.log(
+                    "rewind config: enabled=$rewindFeatureEnabled " +
+                        "speed=${maxRewindSpeed}x memory=${rewindMemoryMb}MB"
+                )
                 var startupCountdown = 10
                 // HACK: FBNeo has a bug where vertical arcade games initialize with wrong
                 // framebuffer orientation despite reporting correct rotation. Toggling the
@@ -865,6 +951,56 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 var verticalReinitPhase = 0
                 val verticalToggle = prepareVerticalModeReinit()
                 glesBackend.onFrameRendered = {
+                    if ((trackSotnMap ||
+                            trackAriaOfSorrowMap ||
+                            trackMetroidGbaMap ||
+                            trackPokemonFireEmerald ||
+                            trackSuperMarioWorld) &&
+                        ++companionFrame >= COMPANION_POLL_FRAMES
+                    ) {
+                        companionFrame = 0
+                        if (trackSotnMap) {
+                            SotnMapReader.read(runner)?.let(launchState::updateSotnMap)
+                        }
+                        if (trackAriaOfSorrowMap) {
+                            AriaOfSorrowMapReader.read(runner, romPath)
+                                ?.let(launchState::updateAriaOfSorrowMap)
+                        }
+                        if (trackMetroidGbaMap) {
+                            MetroidGbaMapReader.read(runner, gameTitle, romPath)
+                                ?.let(launchState::updateMetroidGbaMap)
+                        }
+                        if (trackPokemonFireEmerald) {
+                            PokemonFireEmeraldReader.read(runner)
+                                ?.let(launchState::updatePokemonFireEmerald)
+                        }
+                        if (trackSuperMarioWorld) {
+                            SuperMarioWorldReader.read(
+                                runner,
+                                launchState.superMarioWorld.value?.currentTranslevel ?: -1,
+                            )
+                                ?.let(launchState::updateSuperMarioWorld)
+                        }
+                    }
+                    if (trackUniversalCompanion &&
+                        ++universalCompanionFrame >= UNIVERSAL_COMPANION_POLL_FRAMES
+                    ) {
+                        universalCompanionFrame = 0
+                        val ra = raManager
+                        val memoryReady = ra?.isMemoryInitialized == true && ra.gameId > 0
+                        val snapshot = if (memoryReady) {
+                            ra.getUniversalCompanionSnapshot()
+                        } else {
+                            UniversalCompanionSnapshot(
+                                richPresence = null,
+                                memoryReady = false,
+                                unlockedAchievements = 0,
+                                totalAchievements = 0,
+                                observedAtMillis = System.currentTimeMillis(),
+                            )
+                        }
+                        launchState.updateUniversalCompanion(snapshot)
+                    }
                     if (startupCountdown > 0 && --startupCountdown == 0) {
                         runner.setAudioMuted(false)
                         sessionLog.log("startup reveal: unmute and reveal")
@@ -1147,8 +1283,22 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER).coerceIn(0f, 1f),
             event.getAxisValue(android.view.MotionEvent.AXIS_GAS).coerceIn(0f, 1f),
         )
-        syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_L2, leftTrigger, triggerL2HeldDevices)
-        syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_R2, rightTrigger, triggerR2HeldDevices)
+        syncSyntheticTrigger(
+            deviceId = event.deviceId,
+            port = port,
+            canonical = dev.cannoli.scorza.input.CanonicalButton.BTN_L2,
+            keyCode = KeyEvent.KEYCODE_BUTTON_L2,
+            value = leftTrigger,
+            held = triggerL2HeldDevices,
+        )
+        syncSyntheticTrigger(
+            deviceId = event.deviceId,
+            port = port,
+            canonical = dev.cannoli.scorza.input.CanonicalButton.BTN_R2,
+            keyCode = KeyEvent.KEYCODE_BUTTON_R2,
+            value = rightTrigger,
+            held = triggerR2HeldDevices,
+        )
 
         val stickX = event.getAxisValue(android.view.MotionEvent.AXIS_X)
         val stickY = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
@@ -1315,12 +1465,19 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val onKeyDownCtx = if (currentScreen != null) "libretro/igm" else "libretro/game"
         dev.cannoli.scorza.util.InputLog.write("[$onKeyDownCtx onKeyDown] keyCode=$keyCode")
+        // Hardware volume controls must keep reaching Android even while the core is loading.
+        if (isSystemMediaKey(keyCode)) {
+            val handled = super.onKeyDown(keyCode, event)
+            // PhoneWindow updates STREAM_MUSIC synchronously; run after it returns so the
+            // Thor-specific native fallback sees the new index, including key repeats.
+            scheduleSoftwareVolumeSync()
+            return handled
+        }
         if (missingBios.isNotEmpty()) {
             if (resolveNavButton(keyCode, event.deviceId) == "btn_east") finish()
             return true
         }
         if (loading) return true
-        if (isSystemMediaKey(keyCode)) return super.onKeyDown(keyCode, event)
         if (currentScreen == null) return handleGameplayInput(keyCode, event)
         // All IGM screens route through the dispatcher. Buttons and Shortcuts override the
         // ScreenInputHandler.onRawKeyDown hook to capture raw deviceId/repeatCount; others
@@ -1329,8 +1486,12 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isSystemMediaKey(keyCode)) {
+            val handled = super.onKeyUp(keyCode, event)
+            scheduleSoftwareVolumeSync()
+            return handled
+        }
         if (loading) return true
-        if (isSystemMediaKey(keyCode)) return super.onKeyUp(keyCode, event)
         if (screenStack.isNotEmpty()) {
             val cs = currentScreen
             if (cs is IGMScreen.Guide) {
@@ -1430,13 +1591,17 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     /**
      * Wires the shared InputDispatcher's canonical-event callbacks for IGM dispatch. The IGM has
-     * no dialog precedence layer, so the helper is called with dialogHandler = null. Every IGM
-     * screen registers a handler via ScreenInput in setContent (see igmHandlerFor); the registry's
-     * top is always the active IGM screen's handler.
+     * no dialog precedence layer, so the helper is called with dialogHandler = null. Resolve the
+     * handler directly from this Activity's screen stack: the registry is process-wide, and the
+     * launcher remains composed on the other display while a game runs.
      */
     private fun wireDispatcherForIGM() {
         inputDispatcher.wireToRegistry(
             dialogHandler = null,
+            screenResolver = {
+                currentScreen?.let(::igmHandlerFor)
+                    ?: dev.cannoli.scorza.input.screen.EmptyScreenInputHandler
+            },
         )
     }
 
@@ -1522,6 +1687,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     private fun syncSyntheticTrigger(
         deviceId: Int,
         port: Int,
+        canonical: dev.cannoli.scorza.input.CanonicalButton,
         keyCode: Int,
         value: Float,
         held: MutableSet<Int>,
@@ -1530,9 +1696,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (value > TRIGGER_PRESS_THRESHOLD && !wasHeld) {
             held.add(deviceId)
             pressSyntheticKey(port, keyCode)
+            if (keyCode !in portConsumedKeys[port]) {
+                evaluatorForPort(port)?.evaluateSyntheticButton(canonical, pressed = true)
+                pushPortMask(port)
+            }
         } else if (value < TRIGGER_RELEASE_THRESHOLD && wasHeld) {
             held.remove(deviceId)
             releasePortKey(port, keyCode)
+            evaluatorForPort(port)?.evaluateSyntheticButton(canonical, pressed = false)
+            pushPortMask(port)
         }
     }
 
@@ -1544,9 +1716,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         val portKeys = portPressedKeys[port]
         portKeys.remove(keyCode)
         portConsumedKeys[port].remove(keyCode)
-        if (holdingFf && shouldReleaseHoldFf(shortcuts[ShortcutAction.HOLD_FF], portKeys)) {
+        if (holdingFf && shouldReleaseHoldShortcut(shortcuts[ShortcutAction.HOLD_FF], portKeys)) {
             holdingFf = false
             setFastForward(false)
+        }
+        if (holdingRewind &&
+            shouldReleaseHoldShortcut(shortcuts[ShortcutAction.HOLD_REWIND], portKeys)
+        ) {
+            holdingRewind = false
+            setRewind(false)
         }
         checkPendingHoldRelease(port)
     }
@@ -1578,6 +1756,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         val portKeys = portPressedKeys[port]
         val consumed = portConsumedKeys[port]
         for ((action, chord) in shortcuts) {
+            if (action == ShortcutAction.HOLD_REWIND && !rewindFeatureEnabled) continue
             if (chord.isEmpty() || !portKeys.containsAll(chord)) continue
             if (chord.any { it in consumed }) continue
             when (action) {
@@ -1590,6 +1769,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 ShortcutAction.LOAD_STATE -> {
                     if (stateBasePath.isNotEmpty() && slotManager.stateExists(currentSlot)) {
                         slotManager.loadState(runner, currentSlot)
+                        invalidateRewindHistory()
                         sessionLog.log("RA state load (shortcut): slot=${currentSlot.label}")
                         showOsd(getString(R.string.osd_state_loaded, currentSlot.label), OsdPosition.BottomCenter)
                     }
@@ -1602,6 +1782,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                         startUndoTimer(30_000)
                     }
                     runner.reset()
+                    invalidateRewindHistory()
                     showOsd(getString(R.string.osd_reset), OsdPosition.BottomCenter)
                 }
                 ShortcutAction.SAVE_AND_QUIT -> {
@@ -1628,6 +1809,18 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                 ShortcutAction.HOLD_FF -> {
                     if (holdingFf) continue
                     holdingFf = true; setFastForward(true)
+                }
+                ShortcutAction.HOLD_REWIND -> {
+                    if (holdingRewind) continue
+                    if (!renderer.rewindSupported) {
+                        showOsd(getString(R.string.osd_rewind_unsupported), OsdPosition.BottomCenter)
+                    } else {
+                        if (!renderer.rewindHistoryAvailable) {
+                            showOsd(getString(R.string.osd_rewind_empty), OsdPosition.BottomCenter)
+                        }
+                        holdingRewind = true
+                        setRewind(true)
+                    }
                 }
                 ShortcutAction.OPEN_MENU -> {
                     openMenu()
@@ -1664,6 +1857,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     private fun openMenu() {
         sessionLog.log("openMenu: enter")
+        if (rewinding) {
+            holdingRewind = false
+            setRewind(false)
+        }
         cancelPendingHold()
         raManager?.idle()
         sessionLog.log("openMenu: raIdle")
@@ -1696,6 +1893,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     private fun closeAll() {
         screenStack.clear()
+        syncMenuNavigationPolling()
         if (::stickAutoRepeat.isInitialized) stickAutoRepeat.stop()
         for (set in portPressedKeys) set.clear()
         triggerL2HeldDevices.clear()
@@ -1708,6 +1906,10 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (holdingFf) {
             holdingFf = false
             setFastForward(false)
+        }
+        if (holdingRewind || rewinding) {
+            holdingRewind = false
+            setRewind(false)
         }
         cancelPendingHold()
         for (p in 0 until LibretroRunner.MAX_PORTS) runner.setInput(p, 0)
@@ -1844,6 +2046,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     undoSlot = null
                     startUndoTimer()
                     slotManager.loadState(runner, slot)
+                    invalidateRewindHistory()
                     sessionLog.log("RA state load (IGM): slot=${slot.label}")
                     showOsd(getString(R.string.osd_state_loaded, slot.label), OsdPosition.BottomCenter)
                 }
@@ -1878,6 +2081,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
                     startUndoTimer(30_000)
                 }
                 runner.reset()
+                invalidateRewindHistory()
                 sessionLog.log("RA reset (IGM game reset)")
                 raManager?.reset()
                 showOsd(getString(R.string.osd_reset), OsdPosition.BottomCenter)
@@ -2395,6 +2599,22 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         if (fastForwarding) renderer.fastForwardFrames = maxFfSpeed
     }
 
+    override fun cycleRewindSpeed(direction: Int) {
+        val idx = REWIND_SPEEDS.indexOf(maxRewindSpeed).coerceAtLeast(0)
+        maxRewindSpeed =
+            REWIND_SPEEDS[(idx + direction + REWIND_SPEEDS.size) % REWIND_SPEEDS.size]
+        if (rewinding) renderer.rewindFrames = maxRewindSpeed
+    }
+
+    override fun cycleRewindMemory(direction: Int) {
+        val idx = REWIND_MEMORY_OPTIONS_MB.indexOf(rewindMemoryMb).coerceAtLeast(0)
+        rewindMemoryMb = REWIND_MEMORY_OPTIONS_MB[
+            (idx + direction + REWIND_MEMORY_OPTIONS_MB.size) % REWIND_MEMORY_OPTIONS_MB.size
+        ]
+        renderer.rewindMemoryMb = rewindMemoryMb
+        invalidateRewindHistory()
+    }
+
     // --- Emulator ---
 
     private fun loadVisibleCoreOptions(): List<LibretroRunner.CoreOption> {
@@ -2422,6 +2642,9 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     // --- Shortcuts ---
 
+    private val configurableShortcutActions: List<ShortcutAction>
+        get() = availableShortcutActions(rewindFeatureEnabled)
+
     private fun wireBindingController() {
         bindingController.onProgress = { keys, elapsedMs ->
             val cs = currentScreen
@@ -2433,7 +2656,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             val cs = currentScreen
             if (cs is IGMScreen.Shortcuts) {
                 // selectedIndex 0 is the source picker; actions start at 1.
-                val action = ShortcutAction.entries.getOrNull(cs.selectedIndex - 1)
+                val action = configurableShortcutActions.getOrNull(cs.selectedIndex - 1)
                 if (action != null) {
                     val cleared = shortcuts.filterValues { it != chord }
                     shortcuts = cleared + (action to chord)
@@ -2455,7 +2678,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             bindingController.keyDown(rawKeyCode)
             return true
         }
-        val count = ShortcutAction.entries.size + 1
+        val count = configurableShortcutActions.size + 1
         return when (button) {
             "btn_up" -> {
                 replaceTop(screen.copy(selectedIndex = wrapIndex(screen.selectedIndex, count, -1))); true
@@ -2480,7 +2703,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             }
             "btn_north" -> {
                 if (screen.selectedIndex > 0) {
-                    val action = ShortcutAction.entries[screen.selectedIndex - 1]
+                    val action = configurableShortcutActions[screen.selectedIndex - 1]
                     shortcuts = shortcuts + (action to emptySet())
                     saveCurrentShortcuts()
                 }
@@ -2513,7 +2736,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
         is IGMScreen.Shortcuts -> buildList {
             add(IGMSettingsItem("Source", sourceLabel(shortcutSource)))
-            for (action in ShortcutAction.entries) {
+            for (action in configurableShortcutActions) {
                 val chord = shortcuts[action]
                 val label = if (chord.isNullOrEmpty()) "None"
                 else chord.joinToString(" + ") { shortcutKeyLabel(it) }
@@ -2594,6 +2817,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             debugHud = debugHud,
             showFps = showFpsBaseline,
             maxFfSpeed = maxFfSpeed,
+            maxRewindSpeed = maxRewindSpeed,
+            rewindMemoryMb = rewindMemoryMb,
             shaderPreset = shaderPreset,
             overlay = overlay,
             coreOptions = optionMap,
@@ -2636,6 +2861,8 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         showFps = settings.showFps
         showFpsBaseline = settings.showFps
         maxFfSpeed = settings.maxFfSpeed
+        maxRewindSpeed = settings.maxRewindSpeed
+        rewindMemoryMb = settings.rewindMemoryMb
         shaderPreset = settings.shaderPreset
         overlay = settings.overlay
         shortcutSource = settings.shortcutSource
@@ -2792,6 +3019,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
             UndoType.SAVE -> undoSlot?.let { slotManager.performUndoSave(it) }
             UndoType.LOAD, UndoType.RESET -> slotManager.performUndoLoad(runner)
         }
+        if (type == UndoType.LOAD || type == UndoType.RESET) invalidateRewindHistory()
         clearUndo()
         refreshSlotInfo()
         showOsd(label, OsdPosition.BottomCenter)
@@ -2835,12 +3063,13 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
 
     override fun onPause() {
         super.onPause()
+        inputActivityResumed = false
         if (::sessionLog.isInitialized) sessionLog.log("onPause")
         if (!loading && !cleaned && screenStack.isEmpty()) openMenu()
         stopVsyncPacer()
         glSurfaceView?.onPause()
         if (!loading && !cleaned && sramPath.isNotEmpty()) { File(sramPath).parentFile?.mkdirs(); runner.saveSRAM(sramPath) }
-        if (::menuNavigationPoller.isInitialized) menuNavigationPoller.stop()
+        syncMenuNavigationPolling()
         // Cancel any in-flight stick auto-repeat so it does not keep firing dispatcher callbacks
         // after MainActivity has rewired them.
         if (::stickAutoRepeat.isInitialized) stickAutoRepeat.stop()
@@ -2868,11 +3097,13 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume(); overridePendingTransition(0, 0); glSurfaceView?.onResume(); startVsyncPacer(); goFullscreen()
+        syncSoftwareVolume()
+        inputActivityResumed = true
         if (::sessionLog.isInitialized) sessionLog.log("onResume")
         autoSavedOnStop = false
         if (::inputDispatcher.isInitialized) {
             wireDispatcherForIGM()
-            menuNavigationPoller.start()
+            syncMenuNavigationPolling()
         }
         if (::controllerBridge.isInitialized) {
             controllerBridge.onDeviceAdded = { device ->
@@ -2902,6 +3133,15 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
     }
 
+    private fun syncMenuNavigationPolling() {
+        if (!::menuNavigationPoller.isInitialized) return
+        if (shouldPollInGameMenuNavigation(screenStack.isNotEmpty(), inputActivityResumed)) {
+            menuNavigationPoller.start()
+        } else {
+            menuNavigationPoller.stop()
+        }
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         if (::sessionLog.isInitialized) sessionLog.log("onSaveInstanceState (system will recreate)")
@@ -2916,6 +3156,7 @@ class LibretroActivity : ComponentActivity(), LauncherSettingsHost {
         }
         dev.cannoli.scorza.util.LogWriter.flush(LOG_FLUSH_TIMEOUT_MS)
         isRunning = false
+        launchState.markGameEnded()
         if (::controllerBridge.isInitialized) {
             controllerBridge.onDeviceAdded = null
             controllerBridge.onDeviceRemoved = null

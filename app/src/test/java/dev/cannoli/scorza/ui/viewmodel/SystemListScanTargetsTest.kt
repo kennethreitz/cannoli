@@ -78,6 +78,7 @@ class SystemListScanTargetsTest {
             cannoliPaths = paths,
             romDirectoryWatcher = mockk<RomDirectoryWatcher>(relaxed = true),
             scanScheduler = scheduler,
+            starboardLibrary = mockk(relaxed = true),
         ).also { created.add(it) }
     }
 

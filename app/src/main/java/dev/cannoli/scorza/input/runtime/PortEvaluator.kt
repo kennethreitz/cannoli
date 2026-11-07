@@ -17,6 +17,7 @@ class PortEvaluator(
         data class Key(val keyCode: Int) : BindingKey
         data class Axis(val axis: Int, val direction: Int) : BindingKey
         data class Hat(val axis: Int, val direction: HatDirection) : BindingKey
+        data object SyntheticButton : BindingKey
     }
 
     private val pressed = mutableSetOf<CanonicalButton>()
@@ -46,6 +47,29 @@ class PortEvaluator(
             }
         }
         return deltas
+    }
+
+    /**
+     * Asserts a canonical button synthesized from a motion axis.
+     *
+     * Some Android gamepads expose analog triggers through GAS/BRAKE MotionEvents while their
+     * active mapping only contains BUTTON_L2/BUTTON_R2 key bindings. Keeping this as a distinct
+     * asserter lets the key and axis paths overlap without either one releasing the other early.
+     */
+    fun evaluateSyntheticButton(
+        canonical: CanonicalButton,
+        pressed: Boolean,
+    ): List<CanonicalEvent> {
+        val changed = if (pressed) {
+            assertSource(canonical, BindingKey.SyntheticButton)
+        } else {
+            releaseSource(canonical, BindingKey.SyntheticButton)
+        }
+        if (!changed) return emptyList()
+        return listOf(
+            if (pressed) CanonicalEvent.Pressed(canonical)
+            else CanonicalEvent.Released(canonical)
+        )
     }
 
     fun evaluateAxis(axisValues: Map<Int, Float>): List<CanonicalEvent> {

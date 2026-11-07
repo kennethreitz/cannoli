@@ -23,8 +23,11 @@ class SyncScheduler(
     private val romDir: () -> File,
     private val scope: CoroutineScope,
     private val http: dev.cannoli.scorza.romm.RommHttp,
-    private val intervalMs: Long = 30 * 60 * 1000L,
+    private val intervalMs: () -> Long = {
+        pollIntervalMs(settings.rommSaveSyncIntervalMinutes)
+    },
     private val offlineRetryMs: Long = 30_000L,
+    private val favorites: RommFavoritesSync? = null,
 ) {
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var underlyingCallback: ConnectivityManager.NetworkCallback? = null
@@ -33,6 +36,8 @@ class SyncScheduler(
     private var wasValidated = false
     private val sweeping = java.util.concurrent.atomic.AtomicBoolean(false)
     private val resweepRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val completionLock = Any()
+    private val completionCallbacks = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
     private val forceCooldownMs = 60_000L
 
     fun start() {
@@ -88,13 +93,16 @@ class SyncScheduler(
                 delay(offlineRetryMs)
                 when {
                     statusHolder.state.value == SaveSyncStatus.OFFLINE -> trigger(force = true)
-                    System.currentTimeMillis() - lastSweepAt >= intervalMs -> trigger(force = false)
+                    System.currentTimeMillis() - lastSweepAt >= intervalMs() -> trigger(force = false)
                     else -> {}
                 }
             }
         }
         statusHolder.settle(enabled = service.syncEnabled(), online = true, pendingConflicts = 0, hadError = false)
-        dev.cannoli.scorza.util.RommLog.write("scheduler: started (default + underlying callbacks, ${offlineRetryMs / 1000}s poll)")
+        dev.cannoli.scorza.util.RommLog.write(
+            "scheduler: started (default + underlying callbacks, " +
+                "${intervalMs() / 60_000L}m save poll, ${offlineRetryMs / 1000}s offline retry)"
+        )
         trigger(force = false)
     }
 
@@ -111,7 +119,15 @@ class SyncScheduler(
     }
 
     /** Force an immediate sweep (e.g. on returning from a game), bypassing the debounce window. */
-    fun syncNow() = trigger(force = true)
+    fun syncNow(onComplete: (() -> Unit)? = null) {
+        synchronized(completionLock) {
+            onComplete?.let(completionCallbacks::add)
+        }
+        // A UI request that arrives during a sweep should observe that sweep completing, not queue
+        // another full-library pass. Fire-and-forget requests (notably game exit) still request one
+        // follow-up pass so a save written during the active sweep is not missed.
+        if (!trigger(force = true, resweepIfBusy = onComplete == null)) drainCompletionCallbacks()
+    }
 
     // Registering the network callbacks makes them fire straight away, so every screen unlock used
     // to force several full sweeps. Callback- and start-driven sweeps wait out a cooldown; the
@@ -120,37 +136,45 @@ class SyncScheduler(
 
     private fun evictStaleConnections() = runCatching { http.evictConnections() }
 
-    private fun trigger(force: Boolean, cooldown: Boolean = false) {
+    private fun trigger(
+        force: Boolean,
+        cooldown: Boolean = false,
+        resweepIfBusy: Boolean = force,
+    ): Boolean {
         val now = System.currentTimeMillis()
-        if (!force && !shouldSweep(now, lastSweepAt, intervalMs)) {
+        if (!force && !shouldSweep(now, lastSweepAt, intervalMs())) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger debounced (${(now - lastSweepAt) / 1000}s since last sweep)")
-            return
+            return false
         }
         if (cooldown && !pastForceCooldown(now, lastSweepAt, forceCooldownMs)) {
             dev.cannoli.scorza.util.RommLog.write("scheduler: trigger in cooldown (${(now - lastSweepAt) / 1000}s since last sweep)")
-            return
+            return false
         }
-        if (!service.syncEnabled()) {
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, sync disabled or not connected")
-            return
+        val saveSyncEnabled = service.syncEnabled()
+        val favoriteSyncEnabled = favorites?.syncEnabled() == true
+        if (!saveSyncEnabled && !favoriteSyncEnabled) {
+            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, no RomM sync is enabled")
+            return false
         }
-        if (service.deviceIdOrNull() == null) {
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger skipped, device not registered")
-            return
+        val runSaveSync = saveSyncEnabled && service.deviceIdOrNull() != null
+        if (saveSyncEnabled && !runSaveSync) {
+            dev.cannoli.scorza.util.RommLog.write("scheduler: save sync skipped, device not registered")
         }
         if (!sweeping.compareAndSet(false, true)) {
             // A forced request (network reconnect, game exit) that lands mid-sweep would
             // otherwise be lost; queue exactly one re-sweep for when the current one ends.
-            if (force) resweepRequested.set(true)
-            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger ${if (force) "queued" else "skipped"}, a sweep is already running")
-            return
+            if (force && resweepIfBusy) resweepRequested.set(true)
+            val action = if (force && resweepIfBusy) "queued" else "joined"
+            dev.cannoli.scorza.util.RommLog.write("scheduler: trigger $action, a sweep is already running")
+            return false
         }
         lastSweepAt = now
-        statusHolder.setActive(SaveSyncStatus.CHECKING)
+        if (runSaveSync) statusHolder.setActive(SaveSyncStatus.CHECKING)
         dev.cannoli.scorza.util.RommLog.write("scheduler: trigger fired (force=$force)")
         scope.launch {
             try {
-                service.sweep(rommResolveGame(platformResolver, romDir()))
+                favorites?.sync()
+                if (runSaveSync) service.sweep(rommResolveGame(platformResolver, romDir()))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -162,12 +186,31 @@ class SyncScheduler(
                 )
             } finally {
                 sweeping.set(false)
-                if (resweepRequested.compareAndSet(true, false)) trigger(force = true)
+                if (resweepRequested.compareAndSet(true, false)) {
+                    if (!trigger(force = true)) drainCompletionCallbacks()
+                } else {
+                    drainCompletionCallbacks()
+                }
             }
         }
+        return true
+    }
+
+    private fun drainCompletionCallbacks() {
+        val callbacks = synchronized(completionLock) {
+            if (sweeping.get() || resweepRequested.get()) return
+            completionCallbacks.toList().also { completionCallbacks.clear() }
+        }
+        callbacks.forEach { callback -> runCatching(callback) }
     }
 
     companion object {
+        fun pollIntervalMs(minutes: Int): Long =
+            minutes.coerceIn(
+                SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
+                SettingsRepository.MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
+            ) * 60_000L
+
         fun shouldSweep(now: Long, lastSweepAt: Long, intervalMs: Long): Boolean = now - lastSweepAt >= intervalMs
 
         fun pastForceCooldown(now: Long, lastSweepAt: Long, cooldownMs: Long): Boolean =

@@ -2,9 +2,10 @@ package dev.cannoli.scorza
 
 import android.Manifest
 import android.app.ActivityManager
-import android.app.ActivityOptions
+import android.database.ContentObserver
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +14,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,16 +28,25 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import dev.cannoli.scorza.boot.BootSequencer
 import dev.cannoli.scorza.boot.BootState
 import dev.cannoli.scorza.boot.StartStorageDependentHolder
@@ -53,7 +65,26 @@ import dev.cannoli.scorza.input.InputTesterController
 import dev.cannoli.scorza.input.LauncherActions
 import dev.cannoli.scorza.input.runtime.ControllerBridge
 import dev.cannoli.scorza.launcher.InstalledCoreService
+import dev.cannoli.scorza.launcher.ActivityDisplayRouter
+import dev.cannoli.scorza.launcher.BlackGameScreenActivity
+import dev.cannoli.scorza.launcher.BlackScreenTapGestureDetector
+import dev.cannoli.scorza.launcher.ExternalGameSessionActivity
 import dev.cannoli.scorza.launcher.LaunchManager
+import dev.cannoli.scorza.launcher.LauncherDisplayTransition
+import dev.cannoli.scorza.launcher.launcherDimOverlayAlpha
+import dev.cannoli.scorza.launcher.launcherFromHomeAnchorIntent
+import dev.cannoli.scorza.launcher.launcherFocusIntent
+import dev.cannoli.scorza.launcher.isSystemMediaKey
+import dev.cannoli.scorza.launcher.intendedLauncherDisplayId
+import dev.cannoli.scorza.launcher.launcherDisplayTransition
+import dev.cannoli.scorza.launcher.launcherRelocationIntent
+import dev.cannoli.scorza.launcher.noAnimationActivityOptions
+import dev.cannoli.scorza.launcher.shouldBlankGameScreen
+import dev.cannoli.scorza.launcher.shouldApplyDisplayAvailabilityChange
+import dev.cannoli.scorza.launcher.shouldDimLauncherScreen
+import dev.cannoli.scorza.launcher.shouldRequestLauncherFromHomeAnchor
+import dev.cannoli.scorza.launcher.shouldUseGameDisplayHomeAnchor
+import dev.cannoli.scorza.launcher.setLauncherWindowInputBlocked
 import dev.cannoli.scorza.libretro.LibretroActivity
 import dev.cannoli.scorza.libretro.RetroAchievementsManager
 import dev.cannoli.scorza.navigation.AppNavGraph
@@ -65,6 +96,18 @@ import dev.cannoli.scorza.ui.LocalViewportInsets
 import dev.cannoli.scorza.ui.ViewportInsetsPx
 import dev.cannoli.scorza.ui.screens.BootErrorScreen
 import dev.cannoli.scorza.ui.screens.DialogState
+import dev.cannoli.scorza.ui.components.AriaOfSorrowMapCompanion
+import dev.cannoli.scorza.ui.components.shouldShowAriaOfSorrowMap
+import dev.cannoli.scorza.ui.components.MetroidGbaMapCompanion
+import dev.cannoli.scorza.ui.components.shouldShowMetroidGbaMap
+import dev.cannoli.scorza.ui.components.SotnCastleMapCompanion
+import dev.cannoli.scorza.ui.components.shouldShowSotnCastleMap
+import dev.cannoli.scorza.ui.components.PokemonFireEmeraldCompanion
+import dev.cannoli.scorza.ui.components.shouldShowPokemonFireEmeraldCompanion
+import dev.cannoli.scorza.ui.components.SuperMarioWorldCompanion
+import dev.cannoli.scorza.ui.components.shouldShowSuperMarioWorldCompanion
+import dev.cannoli.scorza.ui.components.UniversalCompanionDeck
+import dev.cannoli.scorza.ui.components.shouldShowUniversalCompanionDeck
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
@@ -74,9 +117,17 @@ import dev.cannoli.scorza.updater.UpdateManager
 import dev.cannoli.ui.theme.CannoliTheme
 import javax.inject.Inject
 import javax.inject.Provider
+import java.lang.ref.WeakReference
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity(), ActivityActions {
+
+    companion object {
+        private const val DISPLAY_CHANGE_SETTLE_MS = 250L
+        private const val HOME_ANCHOR_RESTORE_SETTLE_MS = 1_000L
+
+        private var activeFullLauncher: WeakReference<MainActivity>? = null
+    }
 
     @Inject lateinit var settings: SettingsRepository
     @Inject lateinit var platformConfig: Provider<PlatformConfig>
@@ -96,6 +147,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Inject lateinit var updateManager: UpdateManager
     @Inject lateinit var setupCoordinator: SetupCoordinator
     @Inject lateinit var launchManager: Provider<LaunchManager>
+    @Inject lateinit var activityDisplayRouter: ActivityDisplayRouter
     @Inject lateinit var launchState: dev.cannoli.scorza.launcher.LaunchState
     @Inject lateinit var installedCoreService: Provider<InstalledCoreService>
     @Inject lateinit var romsRepository: Provider<RomsRepository>
@@ -123,6 +175,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Inject lateinit var rommArtFetcher: dev.cannoli.scorza.romm.art.RommArtFetcher
     @Inject lateinit var syncScheduler: dev.cannoli.scorza.romm.sync.SyncScheduler
     @Inject lateinit var saveSyncStatusHolder: dev.cannoli.scorza.romm.sync.SaveSyncStatusHolder
+    @Inject lateinit var standaloneSaveBridge: dev.cannoli.scorza.romm.sync.StandaloneSaveBridge
     @Inject lateinit var cannoliPathsProvider: dev.cannoli.scorza.di.CannoliPathsProvider
     @field:dev.cannoli.scorza.di.IoScope @Inject lateinit var ioScope: kotlinx.coroutines.CoroutineScope
 
@@ -141,6 +194,40 @@ class MainActivity : ComponentActivity(), ActivityActions {
         }
     }
     private var coldStart = true
+    private var launcherInputBlocked = false
+    private var launcherDimmed by mutableStateOf(false)
+    private var launcherSotnMapVisible by mutableStateOf(false)
+    private var launcherAriaOfSorrowMapVisible by mutableStateOf(false)
+    private var launcherMetroidGbaMapVisible by mutableStateOf(false)
+    private var launcherPokemonCompanionVisible by mutableStateOf(false)
+    private var launcherSuperMarioWorldCompanionVisible by mutableStateOf(false)
+    private var launcherUniversalCompanionDeckVisible by mutableStateOf(false)
+    private val displayChangeHandler = Handler(Looper.getMainLooper())
+    private var displayListenerRegistered = false
+    private var secondaryDisplayModeObserverRegistered = false
+    private var lastDualScreenActive: Boolean? = null
+    private var isGameDisplayHomeAnchor = false
+    private var homeAnchorTapGestureDetector: BlackScreenTapGestureDetector? = null
+    private var homeAnchorRestorePending = false
+    private val displayChangeRunnable = Runnable {
+        val dualScreenActive = activityDisplayRouter.isDualScreenActive
+        if (!shouldApplyDisplayAvailabilityChange(
+                defaultDisplayActive = activityDisplayRouter.isDefaultDisplayActive,
+                dualScreenActive = dualScreenActive,
+                lastDualScreenActive = lastDualScreenActive,
+                gameActive = launchState.gameActive.value,
+            )
+        ) return@Runnable
+        applyLauncherDisplayPreference()
+    }
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = scheduleDisplayAvailabilitySync()
+        override fun onDisplayRemoved(displayId: Int) = scheduleDisplayAvailabilitySync()
+        override fun onDisplayChanged(displayId: Int) = scheduleDisplayAvailabilitySync()
+    }
+    private val secondaryDisplayModeObserver = object : ContentObserver(displayChangeHandler) {
+        override fun onChange(selfChange: Boolean) = scheduleDisplayAvailabilitySync()
+    }
 
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -154,6 +241,45 @@ class MainActivity : ComponentActivity(), ActivityActions {
         bootSequencer.onStoragePermissionResult()
     }
 
+    private var pendingStandaloneSaveKind: dev.cannoli.scorza.romm.sync.StandaloneSaveKind? = null
+    private val standaloneSaveAccessLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val kind = pendingStandaloneSaveKind
+        pendingStandaloneSaveKind = null
+        if (kind == null || result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data = result.data ?: return@registerForActivityResult
+        val uri = data.data ?: return@registerForActivityResult
+        val linked = standaloneSaveBridge.persistAccess(kind, uri, data.flags)
+        android.widget.Toast.makeText(
+            this,
+            if (linked) getString(R.string.romm_standalone_saves_connected, kind.emulatorName)
+            else getString(R.string.romm_standalone_saves_wrong_folder, kind.emulatorName),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+        val current = nav.dialogState.value
+        if (current is DialogState.RommSaveSyncMenu) {
+            nav.dialogState.value = current.copy(
+                citraLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CITRA_MMJ,
+                ),
+                cemuLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.CEMU,
+                ),
+                vita3kLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.VITA3K,
+                ),
+                dolphinLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.DOLPHIN,
+                ),
+                ppssppLinked = standaloneSaveBridge.isLinked(
+                    dev.cannoli.scorza.romm.sync.StandaloneSaveKind.PPSSPP,
+                ),
+            )
+        }
+        if (linked) syncScheduler.syncNow()
+    }
+
     private fun loadLoggingPrefs() {
         dev.cannoli.scorza.util.LoggingPrefs.romScan = settings.loggingRomScan
         dev.cannoli.scorza.util.LoggingPrefs.input = settings.loggingInput
@@ -164,6 +290,18 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val preCreateDisplayRouter = EntryPointAccessors.fromApplication(
+            applicationContext,
+            MainActivityDisplayRouterEntryPoint::class.java,
+        ).activityDisplayRouter()
+        isGameDisplayHomeAnchor = shouldBecomeGameDisplayHomeAnchor(preCreateDisplayRouter)
+        if (isGameDisplayHomeAnchor) {
+            setTheme(R.style.Theme_Cannoli_GameSession)
+            super.onCreate(savedInstanceState)
+            configureGameDisplayHomeAnchor()
+            return
+        }
+
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition {
             if (!::bootSequencer.isInitialized) return@setKeepOnScreenCondition true
@@ -175,10 +313,34 @@ class MainActivity : ComponentActivity(), ActivityActions {
             }
         }
         super.onCreate(savedInstanceState)
+        activeFullLauncher = WeakReference(this)
+        lastDualScreenActive = activityDisplayRouter.isDualScreenActive
+        getSystemService(DisplayManager::class.java).registerDisplayListener(
+            displayListener,
+            displayChangeHandler,
+        )
+        displayListenerRegistered = true
+        contentResolver.registerContentObserver(
+            activityDisplayRouter.secondaryDisplayModeUri,
+            false,
+            secondaryDisplayModeObserver,
+        )
+        secondaryDisplayModeObserverRegistered = true
+        // When Cannoli is the system Home activity, keep a task covering the primary display
+        // before moving the launcher away. Otherwise Android immediately relaunches Home on the
+        // uncovered primary display and Main/Black activities ping-pong until boot completes.
+        syncBlackGameScreen()
+        moveLauncherToPreferredDisplay()
 
         // Belt-and-suspenders: ensure the launcher window does not hold FLAG_KEEP_SCREEN_ON,
         // so the system display timeout applies. The IGM activity manages its own flag.
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        lifecycleScope.launch {
+            launchState.gameActive.collect { gameActive ->
+                syncLauncherDimming(gameActive)
+                if (!gameActive) scheduleDisplayAvailabilitySync()
+            }
+        }
 
         @Suppress("DEPRECATION")
         setTaskDescription(
@@ -208,23 +370,55 @@ class MainActivity : ComponentActivity(), ActivityActions {
         bootSequencer.advance()
 
         setContent {
+            val sotnMapSnapshot by launchState.sotnMap.collectAsState()
+            val ariaOfSorrowMapSnapshot by launchState.ariaOfSorrowMap.collectAsState()
+            val metroidGbaMapSnapshot by launchState.metroidGbaMap.collectAsState()
+            val pokemonFireEmeraldSnapshot by launchState.pokemonFireEmerald.collectAsState()
+            val superMarioWorldSnapshot by launchState.superMarioWorld.collectAsState()
+            val universalCompanionSnapshot by launchState.universalCompanion.collectAsState()
+            val saveSyncStatus by saveSyncStatusHolder.state.collectAsState()
             val boot by bootSequencer.state.collectAsState()
+            LaunchedEffect(boot) {
+                if (boot is BootState.Ready) {
+                    syncBlackGameScreen()
+                    syncLauncherDimming()
+                }
+            }
             val appSettings = if (boot is BootState.Ready) settingsViewModel.get().appSettings.collectAsState().value else null
             val themeFont = appSettings?.fontFamily ?: appFonts.mplus1Code
             dev.cannoli.scorza.i18n.ProvideLocalizedResources(appSettings?.languageTag) {
             CannoliTheme(fontFamily = themeFont, iconFontFamily = appFonts.mplus1Code) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(
-                        LocalViewportInsets provides ViewportInsetsPx(
-                            geometryWidthPct = settings.screenGeometryWidth,
-                            geometryHeightPct = settings.screenGeometryHeight,
-                            geometryXPct = settings.screenGeometryX,
-                            geometryYPct = settings.screenGeometryY,
-                            portraitMarginPx = settings.portraitMarginPx,
-                        ),
-                        dev.cannoli.scorza.input.screen.compose.LocalScreenInputRegistry provides screenInputRegistry,
-                    ) {
-                    when (val s = boot) {
+                val dimOverlayAlpha = launcherDimOverlayAlpha(
+                    launcherDimmed &&
+                        !launcherSotnMapVisible &&
+                        !launcherAriaOfSorrowMapVisible &&
+                        !launcherMetroidGbaMapVisible &&
+                        !launcherPokemonCompanionVisible &&
+                        !launcherSuperMarioWorldCompanionVisible &&
+                        !launcherUniversalCompanionDeckVisible
+                )
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawWithContent {
+                            drawContent()
+                            if (dimOverlayAlpha > 0f) {
+                                drawRect(Color.Black, alpha = dimOverlayAlpha)
+                            }
+                        }
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        CompositionLocalProvider(
+                            LocalViewportInsets provides ViewportInsetsPx(
+                                geometryWidthPct = settings.screenGeometryWidth,
+                                geometryHeightPct = settings.screenGeometryHeight,
+                                geometryXPct = settings.screenGeometryX,
+                                geometryYPct = settings.screenGeometryY,
+                                portraitMarginPx = settings.portraitMarginPx,
+                            ),
+                            dev.cannoli.scorza.input.screen.compose.LocalScreenInputRegistry provides screenInputRegistry,
+                        ) {
+                        when (val s = boot) {
                         is BootState.Resolving -> Box(modifier = Modifier.fillMaxSize()) {}
                         is BootState.NeedsPermission, is BootState.NeedsSetup -> {
                             val storageGranted = (s as? BootState.NeedsPermission)?.storageGranted ?: true
@@ -284,7 +478,26 @@ class MainActivity : ComponentActivity(), ActivityActions {
                         }
                         is BootState.Error -> BootErrorScreen(message = s.message)
                         is BootState.Ready -> ReadyNavGraph()
-                    }
+                        }
+                        }
+                        if (launcherSotnMapVisible) {
+                            SotnCastleMapCompanion(snapshot = sotnMapSnapshot)
+                        } else if (launcherAriaOfSorrowMapVisible) {
+                            AriaOfSorrowMapCompanion(snapshot = ariaOfSorrowMapSnapshot)
+                        } else if (launcherMetroidGbaMapVisible) {
+                            MetroidGbaMapCompanion(snapshot = metroidGbaMapSnapshot)
+                        } else if (launcherPokemonCompanionVisible) {
+                            PokemonFireEmeraldCompanion(snapshot = pokemonFireEmeraldSnapshot)
+                        } else if (launcherSuperMarioWorldCompanionVisible) {
+                            SuperMarioWorldCompanion(snapshot = superMarioWorldSnapshot)
+                        } else if (launcherUniversalCompanionDeckVisible) {
+                            UniversalCompanionDeck(
+                                rom = launchState.lastLaunched,
+                                startedAtMillis = launchState.gameStartedAtMillis,
+                                saveSyncStatus = saveSyncStatus,
+                                snapshot = universalCompanionSnapshot,
+                            )
+                        }
                     }
                 }
             }
@@ -360,6 +573,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
      */
     private fun startStorageDependent() {
         settings.reload()
+        // This callback runs synchronously before BootSequencer exposes its Initializing state,
+        // so the idle game display is already black when the library animation begins.
+        syncBlackGameScreen()
+        syncLauncherDimming()
         if (settings.sdCardRoot.isNotEmpty()) {
             dev.cannoli.scorza.util.InputLog.init(settings.sdCardRoot)
         }
@@ -401,17 +618,53 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @Suppress("DEPRECATION")
     override fun onResume() {
         super.onResume()
+        if (!isGameDisplayHomeAnchor && shouldBecomeGameDisplayHomeAnchor()) {
+            recreate()
+            return
+        }
+        if (isGameDisplayHomeAnchor) {
+            if (!shouldBecomeGameDisplayHomeAnchor()) {
+                recreate()
+                return
+            }
+            // The Home anchor can only resume on the game display after the game has stopped
+            // covering it. Recents/"close all" may bypass ExternalGameSessionActivity's normal
+            // return callback, so clear the session here before the launcher is focused again.
+            // Otherwise the launcher remains dimmed and FLAG_NOT_FOCUSABLE makes Android wait for
+            // a focusable window that can never appear.
+            if (launchState.gameActive.value) {
+                dev.cannoli.scorza.util.LaunchLog.write(
+                    "game display home anchor resumed; ending stale game session"
+                )
+                launchState.markGameEnded()
+            }
+            hideSystemUI()
+            reactivateLauncherFromHomeAnchor()
+            return
+        }
+        syncLauncherDimming()
         // Re-wire the dispatcher to launcher dispatch shape on each resume. LibretroActivity
         // overwrites these callbacks with IGM-specific wiring when it runs; we restore the
         // launcher's wiring when we come back.
-        router.wire(inputDispatcher)
-        registerControllerOsd()
-        menuNavigationPoller.start()
+        if (!launcherInputBlocked) {
+            router.wire(inputDispatcher)
+            registerControllerOsd()
+            menuNavigationPoller.start()
+        }
         bootSequencer.advance()
         launchState.launching = false
         val justExited = launchState.lastLaunched
+        if (justExited != null) {
+            dev.cannoli.scorza.util.LaunchLog.write(
+                "launcher resumed rom=${justExited.path.absolutePath} " +
+                    "display=${windowManager.defaultDisplay.displayId} libretroRunning=${LibretroActivity.isRunning}"
+            )
+        }
         if (justExited != null && !LibretroActivity.isRunning) {
             launchState.lastLaunched = null
+            if (activityDisplayRouter.gameLaunchDisplayId() == null) {
+                launchState.markGameEnded()
+            }
         }
         if (!LibretroActivity.isRunning) {
             syncScheduler.start()
@@ -424,13 +677,15 @@ class MainActivity : ComponentActivity(), ActivityActions {
         hideSystemUI()
         if (LibretroActivity.isRunning) {
             val intent = Intent(this, LibretroActivity::class.java)
-            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            val opts = ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            val opts = noAnimationActivityOptions(activityDisplayRouter.gameLaunchDisplayId())
             startActivity(intent, opts)
             return
         }
         settings.reload()
         settingsViewModel.get().load()
+        syncBlackGameScreen()
+        syncLauncherDimming()
         val activeDialogState = nav.dialogState
         if (activeDialogState.value is DialogState.RAAccount && settings.raToken.isEmpty()) {
             activeDialogState.value = DialogState.None
@@ -443,6 +698,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
     override fun onPause() {
         super.onPause()
+        if (isGameDisplayHomeAnchor) return
         syncScheduler.stop()
         menuNavigationPoller.stop()
         // Cancel any in-flight stick auto-repeat so it does not keep firing dispatcher callbacks
@@ -456,7 +712,52 @@ class MainActivity : ComponentActivity(), ActivityActions {
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) window.decorView.post(::hideSystemUI)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (isGameDisplayHomeAnchor) {
+            reactivateLauncherFromHomeAnchor()
+            return
+        }
+        if (!intent.getBooleanExtra(ExternalGameSessionActivity.EXTRA_GAME_SESSION_RETURN, false)) return
+
+        launchState.launching = false
+        launchState.markGameEnded()
+        val justExited = launchState.lastLaunched
+        launchState.lastLaunched = null
+        dev.cannoli.scorza.util.LaunchLog.write(
+            "launcher focus restored display=${windowManager.defaultDisplay.displayId} " +
+                "rom=${justExited?.path?.absolutePath ?: "<none>"}"
+        )
+        if (isReady) {
+            syncScheduler.start()
+            if (justExited != null) syncScheduler.syncNow()
+            launcherActions.get().refreshLauncherLists()
+        }
+        hideSystemUI()
+    }
+
     override fun onDestroy() {
+        if (isGameDisplayHomeAnchor) {
+            super.onDestroy()
+            return
+        }
+        if (activeFullLauncher?.get() === this) activeFullLauncher = null
+        displayChangeHandler.removeCallbacks(displayChangeRunnable)
+        if (displayListenerRegistered) {
+            getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
+            displayListenerRegistered = false
+        }
+        if (secondaryDisplayModeObserverRegistered) {
+            contentResolver.unregisterContentObserver(secondaryDisplayModeObserver)
+            secondaryDisplayModeObserverRegistered = false
+        }
         controllerBridge.onDeviceAdded = null
         controllerBridge.onDeviceRemoved = null
         controllerBridge.stop(this)
@@ -465,7 +766,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
         loginPollHandler.removeCallbacks(loginPollRunnable)
         loginManager?.destroy()
         loginManager = null
-        settings.shutdown()
+        // SettingsRepository is application-scoped and must survive display relocation, which
+        // replaces MainActivity's task. Flush pending writes without stopping its worker thread.
+        settings.flush()
         if (isReady) {
             systemListViewModel.get().close()
             gameListViewModel.get().close()
@@ -473,10 +776,35 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        return true
+        val detector = homeAnchorTapGestureDetector
+        if (isGameDisplayHomeAnchor && detector != null && detector.onTouch(
+                actionMasked = event.actionMasked,
+                x = event.x,
+                y = event.y,
+                pointerCount = event.pointerCount,
+        )
+        ) {
+            window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
+        }
+        return if (launcherSotnMapVisible ||
+            launcherAriaOfSorrowMapVisible ||
+            launcherMetroidGbaMapVisible
+        ) {
+            super.dispatchTouchEvent(event)
+        } else {
+            true
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isSystemMediaKey(event.keyCode)) return super.dispatchKeyEvent(event)
+        if (isGameDisplayHomeAnchor) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                window.decorView.post { reactivateLauncherFromHomeAnchor(userInitiated = true) }
+            }
+            return true
+        }
+        if (launcherInputBlocked) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             dev.cannoli.scorza.util.InputLog.write(
                 "[launcher dispatch] keyCode=${event.keyCode} source=0x${event.source.toString(16)}"
@@ -528,6 +856,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (isSystemMediaKey(keyCode)) return super.onKeyDown(keyCode, event)
+        if (launcherInputBlocked) return true
         val bootValOnKeyDown = bootSequencer.state.value
         if (!isReady && bootValOnKeyDown !is BootState.NeedsSetup && bootValOnKeyDown !is BootState.NeedsPermission) {
             if (bootValOnKeyDown is BootState.Error && AndroidGamepadKeyNames.isGamepadEvent(event)) {
@@ -579,6 +909,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isSystemMediaKey(keyCode)) return super.onKeyUp(keyCode, event)
+        if (launcherInputBlocked) return true
         val bootValOnKeyUp = bootSequencer.state.value
         if (!isReady && bootValOnKeyUp !is BootState.NeedsSetup && bootValOnKeyUp !is BootState.NeedsPermission) return true
         val currentScreenForKey = nav.currentScreen
@@ -596,6 +928,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (launcherInputBlocked) return true
         val bootValOnMotion = bootSequencer.state.value
         if (!isReady && bootValOnMotion !is BootState.NeedsSetup && bootValOnMotion !is BootState.NeedsPermission) return super.onGenericMotionEvent(event)
         val currentScreenForMotion = nav.currentScreen
@@ -624,6 +957,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        if (launcherInputBlocked) return true
         val csForListen = nav.currentScreen
         if (csForListen is LauncherScreen.EditButtons && editButtonsController.isListening) {
             val axes = listOf(0, 1, 11, 14, 15, 16, 17, 18, 22, 23)
@@ -690,6 +1024,81 @@ class MainActivity : ComponentActivity(), ActivityActions {
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
+    @Suppress("DEPRECATION")
+    private fun shouldBecomeGameDisplayHomeAnchor(
+        displayRouter: ActivityDisplayRouter = activityDisplayRouter,
+    ): Boolean =
+        shouldUseGameDisplayHomeAnchor(
+            currentDisplayId = windowManager.defaultDisplay.displayId,
+            preferredLauncherDisplayId = displayRouter.preferredLauncherDisplayId(),
+            gameDisplayId = displayRouter.gameLaunchDisplayId(),
+            cannoliIsDefaultHome = isCannoliDefaultHome(),
+        )
+
+    private fun configureGameDisplayHomeAnchor() {
+        homeAnchorTapGestureDetector = BlackScreenTapGestureDetector(
+            ViewConfiguration.get(this).scaledTouchSlop.toFloat()
+        )
+        window.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
+            clearFlags(
+                WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+        setContentView(View(this).apply { setBackgroundColor(android.graphics.Color.BLACK) })
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() =
+                    reactivateLauncherFromHomeAnchor(userInitiated = true)
+            },
+        )
+        hideSystemUI()
+        window.decorView.post(::reactivateLauncherFromHomeAnchor)
+    }
+
+    private fun reactivateLauncherFromHomeAnchor(userInitiated: Boolean = false) {
+        val launcherDisplayId = activityDisplayRouter.preferredLauncherDisplayId() ?: return
+        @Suppress("DEPRECATION")
+        if (launcherDisplayId == windowManager.defaultDisplay.displayId) return
+        val runningLauncher = activeFullLauncher?.get()?.takeIf { activity ->
+            !activity.isFinishing &&
+                !activity.isDestroyed &&
+                activity.windowManager.defaultDisplay.displayId == launcherDisplayId
+        }
+        if (!shouldRequestLauncherFromHomeAnchor(
+                runningLauncherAvailable = runningLauncher != null,
+                userInitiated = userInitiated,
+                restorePending = homeAnchorRestorePending,
+            )
+        ) return
+        try {
+            val launcherIntent = if (runningLauncher != null) {
+                launcherFocusIntent(this)
+            } else {
+                homeAnchorRestorePending = true
+                launcherFromHomeAnchorIntent(this)
+            }
+            startActivity(
+                launcherIntent,
+                noAnimationActivityOptions(launcherDisplayId),
+            )
+            if (runningLauncher == null) {
+                window.decorView.postDelayed(
+                    { homeAnchorRestorePending = false },
+                    HOME_ANCHOR_RESTORE_SETTLE_MS,
+                )
+            }
+        } catch (e: RuntimeException) {
+            homeAnchorRestorePending = false
+            dev.cannoli.scorza.util.ErrorLog.error(
+                "home anchor launcher restore failed: display=$launcherDisplayId",
+                e,
+            )
+        }
+    }
+
     private fun unregisterCoreQueryReceiver() {
         coreQueryReceiver?.let {
             try { unregisterReceiver(it) } catch (_: IllegalArgumentException) {}
@@ -703,10 +1112,212 @@ class MainActivity : ComponentActivity(), ActivityActions {
         super.attachBaseContext(dev.cannoli.scorza.i18n.LocaleOverride.wrap(newBase))
     }
 
+    override fun applyLauncherDisplayPreference() {
+        @Suppress("DEPRECATION")
+        val currentDisplayId = windowManager.defaultDisplay.displayId
+        val targetDisplayId = activityDisplayRouter.preferredLauncherDisplayId(
+            forcePrimaryWhenDisabled = true,
+        )
+        val dualScreenActive = activityDisplayRouter.isDualScreenActive
+        lastDualScreenActive = dualScreenActive
+        when (
+            launcherDisplayTransition(
+                currentDisplayId = currentDisplayId,
+                targetDisplayId = targetDisplayId,
+                dualScreenActive = dualScreenActive,
+            )
+        ) {
+            LauncherDisplayTransition.SYNC_IN_PLACE -> {
+                syncBlackGameScreen()
+                syncLauncherDimming()
+            }
+            LauncherDisplayTransition.COVER_GAME_DISPLAY_THEN_MOVE -> {
+                // Enabling: cover the Home display before moving MainActivity away from it.
+                syncBlackGameScreen()
+                syncLauncherDimming()
+                moveLauncherToPreferredDisplay(forcePrimaryWhenDisabled = true)
+            }
+            LauncherDisplayTransition.MOVE_THEN_SYNC_ON_DESTINATION -> {
+                // Disabling: keep the black task in place until MainActivity reaches primary.
+                // The destination activity's create/resume path will dismiss it safely.
+                syncLauncherDimming()
+                moveLauncherToPreferredDisplay(forcePrimaryWhenDisabled = true)
+            }
+        }
+    }
+
+    private fun scheduleDisplayAvailabilitySync() {
+        displayChangeHandler.removeCallbacks(displayChangeRunnable)
+        displayChangeHandler.postDelayed(displayChangeRunnable, DISPLAY_CHANGE_SETTLE_MS)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun syncLauncherDimming(gameActive: Boolean = launchState.gameActive.value) {
+        val launcherDisplayId = windowManager.defaultDisplay.displayId
+        val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
+        val dim = shouldDimLauncherScreen(
+            dualScreenActive = activityDisplayRouter.isDualScreenActive,
+            gameActive = gameActive,
+            gameDisplayId = gameDisplayId,
+            launcherDisplayId = launcherDisplayId,
+        )
+        val showSotnMap = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowSotnCastleMap(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showAriaOfSorrowMap = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowAriaOfSorrowMap(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showMetroidGbaMap = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowMetroidGbaMap(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showPokemonCompanion = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowPokemonFireEmeraldCompanion(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showSuperMarioWorldCompanion = gameActive &&
+            gameDisplayId != null &&
+            gameDisplayId != launcherDisplayId &&
+            shouldShowSuperMarioWorldCompanion(
+                gameActive = true,
+                displayName = launchState.lastLaunched?.displayName,
+                fileName = launchState.lastLaunched?.path?.name,
+            )
+        val showUniversalCompanionDeck = shouldShowUniversalCompanionDeck(
+            experimentalFeatures = settings.experimentalFeatures,
+            dualScreenLaunching = settings.dualScreenLaunching,
+            enabled = settings.universalCompanionDeck,
+            gameActive = gameActive,
+            gameDisplayId = gameDisplayId,
+            launcherDisplayId = launcherDisplayId,
+        )
+        launcherDimmed = dim
+        launcherSotnMapVisible = showSotnMap
+        launcherAriaOfSorrowMapVisible = showAriaOfSorrowMap
+        launcherMetroidGbaMapVisible = showMetroidGbaMap
+        launcherPokemonCompanionVisible = showPokemonCompanion
+        launcherSuperMarioWorldCompanionVisible = showSuperMarioWorldCompanion
+        launcherUniversalCompanionDeckVisible = showUniversalCompanionDeck
+        updateLauncherInputBlock(
+            dim ||
+                showSotnMap ||
+                showAriaOfSorrowMap ||
+                showMetroidGbaMap ||
+                showPokemonCompanion ||
+                showSuperMarioWorldCompanion ||
+                showUniversalCompanionDeck
+        )
+    }
+
+    private fun updateLauncherInputBlock(blocked: Boolean) {
+        if (launcherInputBlocked == blocked) return
+        launcherInputBlocked = blocked
+        setLauncherWindowInputBlocked(window, blocked)
+        if (blocked) {
+            router.cancelPendingInput()
+            stickAutoRepeat.stop()
+            menuNavigationPoller.stop()
+            portRouter.resetAllEvaluators()
+        } else if (
+            isReady && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        ) {
+            menuNavigationPoller.start()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun syncBlackGameScreen() {
+        val launcherDisplayId = intendedLauncherDisplayId(
+            currentDisplayId = windowManager.defaultDisplay.displayId,
+            preferredDisplayId = activityDisplayRouter.preferredLauncherDisplayId(),
+        )
+        val gameDisplayId = activityDisplayRouter.gameLaunchDisplayId()
+        val shouldShow = shouldBlankGameScreen(
+            dualScreenActive = activityDisplayRouter.isDualScreenActive,
+            gameDisplayId = gameDisplayId,
+            launcherDisplayId = launcherDisplayId,
+        )
+        if (!shouldShow) {
+            dismissBlackGameScreen()
+            return
+        }
+
+        val targetDisplayId = gameDisplayId ?: return
+        if (BlackGameScreenActivity.isShowingOrLaunchingOn(targetDisplayId)) return
+
+        dismissBlackGameScreen()
+        BlackGameScreenActivity.markLaunchPending(targetDisplayId)
+        try {
+            startActivity(
+                BlackGameScreenActivity.intent(this),
+                noAnimationActivityOptions(targetDisplayId),
+            )
+        } catch (e: RuntimeException) {
+            dismissBlackGameScreen()
+            dev.cannoli.scorza.util.ErrorLog.error(
+                "black game screen failed: display=$targetDisplayId",
+                e,
+            )
+        }
+    }
+
+    private fun dismissBlackGameScreen() {
+        BlackGameScreenActivity.finishIfRunning()
+    }
+
+    private fun isCannoliDefaultHome(): Boolean {
+        val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = packageManager.resolveActivity(
+            homeIntent,
+            PackageManager.MATCH_DEFAULT_ONLY,
+        )
+        return resolved?.activityInfo?.packageName == packageName
+    }
+
+    @Suppress("DEPRECATION")
+    private fun moveLauncherToPreferredDisplay(forcePrimaryWhenDisabled: Boolean = false) {
+        val targetDisplayId = activityDisplayRouter.preferredLauncherDisplayId(
+            forcePrimaryWhenDisabled = forcePrimaryWhenDisabled
+        ) ?: return
+        if (windowManager.defaultDisplay.displayId == targetDisplayId) return
+
+        try {
+            startActivity(
+                launcherRelocationIntent(this),
+                noAnimationActivityOptions(targetDisplayId),
+            )
+        } catch (e: RuntimeException) {
+            dev.cannoli.scorza.util.ErrorLog.error(
+                "launcher display move failed: display=$targetDisplayId",
+                e,
+            )
+        }
+    }
+
     override fun restartApp() {
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        val opts = ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
+        val opts = noAnimationActivityOptions(
+            activityDisplayRouter.preferredLauncherDisplayId()
+        )
         startActivity(intent, opts)
         Runtime.getRuntime().exit(0)
     }
@@ -809,6 +1420,13 @@ class MainActivity : ComponentActivity(), ActivityActions {
         }
     }
 
+    override fun requestStandaloneSaveAccess(
+        kind: dev.cannoli.scorza.romm.sync.StandaloneSaveKind,
+    ) {
+        pendingStandaloneSaveKind = kind
+        standaloneSaveAccessLauncher.launch(standaloneSaveBridge.accessIntent(kind))
+    }
+
     private suspend fun completeRommConnection(): DialogState.RommConnected {
         settingsViewModel.get().exitSubList()
         val user = withContext(Dispatchers.IO) { rommClient.currentUser() }
@@ -829,4 +1447,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
         dev.cannoli.scorza.romm.PairingFailure.FAILED -> getString(R.string.romm_pair_failed)
     }
 
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+internal interface MainActivityDisplayRouterEntryPoint {
+    fun activityDisplayRouter(): ActivityDisplayRouter
 }

@@ -41,6 +41,8 @@ class OverrideManager(
         var leftStickAsDpad: Boolean = false,
         var allowDiagonals: Boolean = true,
         var maxFfSpeed: Int = 4,
+        var maxRewindSpeed: Int = 4,
+        var rewindMemoryMb: Int = DEFAULT_REWIND_MEMORY_MB,
         var crtCurvature: Float = 1.7f,
         var crtScanline: Float = 0.75f,
         var crtMaskDark: Float = 0.3f,
@@ -70,6 +72,8 @@ class OverrideManager(
             leftStickAsDpad == other.leftStickAsDpad &&
             allowDiagonals == other.allowDiagonals &&
             maxFfSpeed == other.maxFfSpeed &&
+            maxRewindSpeed == other.maxRewindSpeed &&
+            rewindMemoryMb == other.rewindMemoryMb &&
             crtCurvature == other.crtCurvature &&
             crtScanline == other.crtScanline &&
             crtMaskDark == other.crtMaskDark &&
@@ -226,6 +230,12 @@ class OverrideManager(
         s["left_stick_dpad"]?.let { settings.leftStickAsDpad = it == "true" }
         s["allow_diagonals"]?.let { settings.allowDiagonals = it == "true" }
         s["max_ff_speed"]?.let { v -> v.toIntOrNull()?.let { settings.maxFfSpeed = it } }
+        s["max_rewind_speed"]?.let { v -> v.toIntOrNull()?.let { settings.maxRewindSpeed = it } }
+        s["rewind_memory_mb"]?.let { v ->
+            v.toIntOrNull()
+                ?.takeIf { it in REWIND_MEMORY_OPTIONS_MB }
+                ?.let { settings.rewindMemoryMb = it }
+        }
         s["crt_curvature"]?.toFloatOrNull()?.let { settings.crtCurvature = it }
         s["crt_scanline"]?.toFloatOrNull()?.let { settings.crtScanline = it }
         s["crt_mask_dark"]?.toFloatOrNull()?.let { settings.crtMaskDark = it }
@@ -338,6 +348,8 @@ class OverrideManager(
         "left_stick_dpad" to settings.leftStickAsDpad.toString(),
         "allow_diagonals" to settings.allowDiagonals.toString(),
         "max_ff_speed" to settings.maxFfSpeed.toString(),
+        "max_rewind_speed" to settings.maxRewindSpeed.toString(),
+        "rewind_memory_mb" to settings.rewindMemoryMb.toString(),
         "crt_curvature" to settings.crtCurvature.toString(),
         "crt_scanline" to settings.crtScanline.toString(),
         "crt_mask_dark" to settings.crtMaskDark.toString(),
@@ -365,6 +377,12 @@ class OverrideManager(
             delta["allow_diagonals"] = settings.allowDiagonals.toString()
         }
         if (settings.maxFfSpeed != baseline.maxFfSpeed) delta["max_ff_speed"] = settings.maxFfSpeed.toString()
+        if (settings.maxRewindSpeed != baseline.maxRewindSpeed) {
+            delta["max_rewind_speed"] = settings.maxRewindSpeed.toString()
+        }
+        if (settings.rewindMemoryMb != baseline.rewindMemoryMb) {
+            delta["rewind_memory_mb"] = settings.rewindMemoryMb.toString()
+        }
         if (settings.crtCurvature != baseline.crtCurvature) delta["crt_curvature"] = settings.crtCurvature.toString()
         if (settings.crtScanline != baseline.crtScanline) delta["crt_scanline"] = settings.crtScanline.toString()
         if (settings.crtMaskDark != baseline.crtMaskDark) delta["crt_mask_dark"] = settings.crtMaskDark.toString()

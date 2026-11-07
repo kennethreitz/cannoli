@@ -153,15 +153,46 @@ sealed interface DialogState {
         val selectedIndex: Int = 0,
         val supported: Boolean = true,
         val enabled: Boolean = false,
+        val syncIntervalMinutes: Int = dev.cannoli.scorza.settings.SettingsRepository.DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
         val backupCount: Int = 5,
         val pendingConflicts: Int = 0,
         val syncErrors: Int = 0,
         val hasBackups: Boolean = false,
+        val citraAvailable: Boolean = false,
+        val citraLinked: Boolean = false,
+        val cemuAvailable: Boolean = false,
+        val cemuLinked: Boolean = false,
+        val vita3kAvailable: Boolean = false,
+        val vita3kLinked: Boolean = false,
+        val dolphinAvailable: Boolean = false,
+        val dolphinLinked: Boolean = false,
+        val ppssppAvailable: Boolean = false,
+        val ppssppLinked: Boolean = false,
     ) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null, val fromQuickMenu: Boolean = false) : DialogState
+    data class RommUploadConfirm(
+        val gameName: String,
+        val fileName: String,
+        val sizeLabel: String,
+    ) : DialogState
+    data class RommUploadProgress(
+        val gameName: String,
+        val fileName: String,
+        val progress: Float = 0f,
+    ) : DialogState
+    data class RommUploadResult(
+        val success: Boolean,
+        val message: String,
+        val returnToContextMenu: Boolean,
+    ) : DialogState
     data class RommPlatformToggle(val items: List<RommPlatformToggleItem>, val selectedIndex: Int = 0) : DialogState
     data class RommCollectionToggle(val items: List<RommCollectionToggleItem>, val selectedIndex: Int = 0) : DialogState
-    data class SyncHistory(val entries: List<SyncHistoryRow>, val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : DialogState
+    data class SyncHistory(
+        val entries: List<SyncHistoryRow>,
+        val selectedIndex: Int = 0,
+        val fromSaveSyncMenu: Boolean = false,
+        val syncing: Boolean = false,
+    ) : DialogState
     data class SyncErrors(val errors: List<dev.cannoli.scorza.romm.sync.SyncFailure>, val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : DialogState
     data class RommSavesMenu(val title: String, val options: List<String>, val selectedIndex: Int = 0) : DialogState
     data class SaveBackupGames(val games: List<dev.cannoli.scorza.romm.sync.SaveBackupGame>, val selectedIndex: Int = 0) : DialogState
@@ -196,6 +227,7 @@ data class RommCollectionToggleItem(val group: dev.cannoli.scorza.romm.RommColle
 enum class ConflictChoice { KEEP_LOCAL, USE_SERVER, SKIP }
 data class ConflictRow(
     val gameKey: String,
+    val slot: String = dev.cannoli.scorza.romm.sync.DEFAULT_SLOT,
     val name: String,
     val choice: ConflictChoice = ConflictChoice.SKIP,
     val localMillis: Long? = null,

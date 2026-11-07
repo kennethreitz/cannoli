@@ -3,6 +3,8 @@ package dev.cannoli.scorza.settings
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -75,5 +77,48 @@ class SettingsRepositoryTest {
 
         settings.language = ""
         assertEquals("en", settings.language)
+    }
+
+    @Test fun `dual-screen launching defaults off and can be enabled`() {
+        val settings = newRepo()
+
+        assertFalse(settings.dualScreenLaunching)
+        settings.dualScreenLaunching = true
+        assertTrue(settings.dualScreenLaunching)
+    }
+
+    @Test fun `rewind requires an explicit opt in`() {
+        val settings = newRepo()
+
+        assertFalse(settings.rewindEnabled)
+        settings.rewindEnabled = true
+        assertTrue(settings.rewindEnabled)
+    }
+
+    @Test fun `universal companion deck requires an explicit opt in`() {
+        val settings = newRepo()
+
+        assertFalse(settings.universalCompanionDeck)
+        settings.universalCompanionDeck = true
+        assertTrue(settings.universalCompanionDeck)
+    }
+
+    @Test fun `save sync polling defaults to three minutes and stays within safe bounds`() {
+        val settings = newRepo()
+
+        assertEquals(3, settings.rommSaveSyncIntervalMinutes)
+        assertEquals(
+            listOf(1, 3, 10, 30, 60, 240),
+            SettingsRepository.ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES,
+        )
+
+        settings.rommSaveSyncIntervalMinutes = 240
+        assertEquals(240, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = 0
+        assertEquals(SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = Int.MAX_VALUE
+        assertEquals(SettingsRepository.MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
     }
 }

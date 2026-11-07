@@ -26,11 +26,14 @@ fun fakeOption(
 open class FakeLauncherSettingsHost : LauncherSettingsHost {
     override var hasShaderParams = false
     override var maxFfSpeed = 4
+    override var maxRewindSpeed = 4
+    override var rewindMemoryMb = 256
     override var showFpsBaseline = false
     override var debugHud = false
     override var leftStickAsDpad = false
     override var allowDiagonals = true
     override var experimentalFeatures = false
+    override var rewindFeatureEnabled = false
     override var coreOptions = emptyList<LibretroRunner.CoreOption>()
     override var coreCategories = emptyList<LibretroRunner.CoreOptionCategory>()
     override var controllerTypes = emptyList<LibretroRunner.ControllerType>()
@@ -55,6 +58,8 @@ open class FakeLauncherSettingsHost : LauncherSettingsHost {
     override fun cycleShader(direction: Int) { calls.add("shader:$direction") }
     override fun cycleOverlay(direction: Int) { calls.add("overlay:$direction") }
     override fun cycleFfSpeed(direction: Int) { calls.add("ff:$direction") }
+    override fun cycleRewindSpeed(direction: Int) { calls.add("rewind:$direction") }
+    override fun cycleRewindMemory(direction: Int) { calls.add("rewindMemory:$direction") }
     override fun toggleShowFps() { calls.add("showFps"); showFpsBaseline = !showFpsBaseline }
     override fun toggleDebugHud() { calls.add("debugHud"); debugHud = !debugHud }
     override fun toggleLeftStickAsDpad() { calls.add("leftStick"); leftStickAsDpad = !leftStickAsDpad }

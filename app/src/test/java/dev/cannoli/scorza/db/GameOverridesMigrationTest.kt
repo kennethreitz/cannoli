@@ -42,6 +42,21 @@ class GameOverridesMigrationTest {
             )
             """.trimIndent(),
         )
+        // v10's table, so migration 13 (slot-keyed pending conflicts) has something to rewrite.
+        conn.execSQL(
+            """
+            CREATE TABLE pending_conflicts (
+                game_key TEXT PRIMARY KEY,
+                rom_id INTEGER NOT NULL,
+                display_name TEXT NOT NULL,
+                server_save_id INTEGER,
+                server_content_hash TEXT,
+                server_updated_at TEXT,
+                detected_at INTEGER NOT NULL,
+                dismissed_hash TEXT
+            )
+            """.trimIndent(),
+        )
         conn.execSQL("PRAGMA user_version = 11")
         return conn
     }

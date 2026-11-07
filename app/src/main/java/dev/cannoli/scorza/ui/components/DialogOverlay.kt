@@ -117,7 +117,8 @@ fun DialogOverlay(
                             isSelected = isSelected,
                             fontSize = listFontSize,
                             lineHeight = listLineHeight,
-                            verticalPadding = listVerticalPadding
+                            verticalPadding = listVerticalPadding,
+                            enabled = !dev.cannoli.scorza.input.isDisabledMenuOption(option),
                         )
                     } else {
                         PillRowText(
@@ -449,9 +450,22 @@ fun DialogOverlay(
         }
 
         is DialogState.RommSaveSyncMenu -> {
-            val rows = RommSaveSyncRow.visibleRows(dialogState.supported, dialogState.enabled, dialogState.pendingConflicts, dialogState.syncErrors, dialogState.hasBackups)
+            val rows = RommSaveSyncRow.visibleRows(
+                dialogState.supported,
+                dialogState.enabled,
+                dialogState.pendingConflicts,
+                dialogState.syncErrors,
+                dialogState.hasBackups,
+                dialogState.citraAvailable,
+                dialogState.cemuAvailable,
+                dialogState.vita3kAvailable,
+                dialogState.dolphinAvailable,
+                dialogState.ppssppAvailable,
+            )
             val selectedRow = rows.getOrNull(dialogState.selectedIndex)
-            val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE || selectedRow == RommSaveSyncRow.BACKUPS
+            val isCycleRow = selectedRow == RommSaveSyncRow.TOGGLE ||
+                selectedRow == RommSaveSyncRow.INTERVAL ||
+                selectedRow == RommSaveSyncRow.BACKUPS
             ListDialogScreen(
                 backgroundImagePath = backgroundImagePath,
                 backgroundTint = backgroundTint,
@@ -471,6 +485,21 @@ fun DialogOverlay(
                                 if (!dialogState.supported) R.string.romm_save_sync_needs_500
                                 else if (dialogState.enabled) R.string.value_on else R.string.value_off
                             ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding
+                        )
+                        RommSaveSyncRow.INTERVAL -> PillRowKeyValue(
+                            label = stringResource(R.string.setting_romm_save_sync_interval),
+                            value = when (dialogState.syncIntervalMinutes) {
+                                60 -> stringResource(R.string.romm_save_sync_interval_one_hour)
+                                240 -> stringResource(R.string.romm_save_sync_interval_four_hours)
+                                else -> stringResource(
+                                    R.string.romm_save_sync_interval_minutes,
+                                    dialogState.syncIntervalMinutes,
+                                )
+                            },
                             isSelected = isSelected,
                             fontSize = listFontSize,
                             lineHeight = listLineHeight,
@@ -513,6 +542,61 @@ fun DialogOverlay(
                             lineHeight = listLineHeight,
                             verticalPadding = listVerticalPadding
                         )
+                        RommSaveSyncRow.CITRA -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_citra_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.citraLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.CEMU -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_cemu_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.cemuLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.VITA3K -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_vita3k_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.vita3kLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.DOLPHIN -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_dolphin_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.dolphinLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
+                        RommSaveSyncRow.PPSSPP -> PillRowKeyValue(
+                            label = stringResource(R.string.romm_ppsspp_saves_experimental),
+                            value = stringResource(
+                                if (dialogState.ppssppLinked) R.string.romm_save_folder_connected
+                                else R.string.romm_save_folder_connect,
+                            ),
+                            isSelected = isSelected,
+                            fontSize = listFontSize,
+                            lineHeight = listLineHeight,
+                            verticalPadding = listVerticalPadding,
+                        )
                     }
                 }
             }
@@ -528,6 +612,46 @@ fun DialogOverlay(
             ConfirmOverlay(
                 message = stringResource(message),
                 buttonStyle = buttonStyle
+            )
+        }
+
+        is DialogState.RommUploadConfirm -> {
+            ConfirmOverlay(
+                message = stringResource(
+                    R.string.romm_upload_confirm,
+                    dialogState.fileName,
+                    dialogState.sizeLabel,
+                ),
+                buttonStyle = buttonStyle,
+            )
+        }
+
+        is DialogState.RommUploadProgress -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                dev.cannoli.scorza.ui.screens.HousekeepingScreen(
+                    kind = dev.cannoli.scorza.ui.screens.HousekeepingKind.ROMM_UPLOAD,
+                    progress = dialogState.progress,
+                    statusLabel = stringResource(
+                        R.string.romm_upload_status,
+                        dialogState.fileName,
+                        (dialogState.progress * 100f).toInt().coerceIn(0, 100),
+                    ),
+                )
+                BottomBar(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(screenPadding),
+                    leftItems = listOf(buttonStyle.back to stringResource(R.string.label_cancel)),
+                    rightItems = emptyList(),
+                )
+            }
+        }
+
+        is DialogState.RommUploadResult -> {
+            MessageOverlay(
+                message = dialogState.message,
+                buttonStyle = buttonStyle,
+                buttonLabel = stringResource(R.string.label_back),
             )
         }
 
@@ -745,13 +869,24 @@ fun DialogOverlay(
         is DialogState.SyncHistory -> {
             val colors = LocalCannoliColors.current
             val font = LocalCannoliFont.current
+            val selected = dialogState.entries.getOrNull(dialogState.selectedIndex)
             ListDialogScreen(
                 backgroundImagePath = backgroundImagePath,
                 backgroundTint = backgroundTint,
                 title = stringResource(R.string.sync_history_title),
                 listFontSize = listFontSize,
                 listLineHeight = listLineHeight,
-                rightBottomItems = emptyList(),
+                rightBottomItems = buildList {
+                    if (selected?.canPlay == true && !dialogState.syncing) {
+                        add(buttonStyle.confirm to stringResource(R.string.label_play))
+                    }
+                    add(
+                        buttonStyle.north to stringResource(
+                            if (dialogState.syncing) R.string.sync_history_syncing
+                            else R.string.sync_history_sync_now,
+                        ),
+                    )
+                },
                 buttonStyle = buttonStyle
             ) {
                 if (dialogState.entries.isEmpty()) {
@@ -1232,13 +1367,30 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, CITRA, CEMU, VITA3K, DOLPHIN, PPSSPP, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
-        fun visibleRows(supported: Boolean, enabled: Boolean, pendingConflicts: Int = 0, syncErrors: Int = 0, hasBackups: Boolean = false): List<RommSaveSyncRow> =
+        fun visibleRows(
+            supported: Boolean,
+            enabled: Boolean,
+            pendingConflicts: Int = 0,
+            syncErrors: Int = 0,
+            hasBackups: Boolean = false,
+            citraAvailable: Boolean = false,
+            cemuAvailable: Boolean = false,
+            vita3kAvailable: Boolean = false,
+            dolphinAvailable: Boolean = false,
+            ppssppAvailable: Boolean = false,
+        ): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
                 if (supported && enabled) {
+                    add(INTERVAL)
                     add(BACKUPS)
+                    if (citraAvailable) add(CITRA)
+                    if (cemuAvailable) add(CEMU)
+                    if (vita3kAvailable) add(VITA3K)
+                    if (dolphinAvailable) add(DOLPHIN)
+                    if (ppssppAvailable) add(PPSSPP)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)
                     if (syncErrors > 0) add(ERRORS)

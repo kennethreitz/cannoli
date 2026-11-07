@@ -6,6 +6,8 @@ import dev.cannoli.scorza.db.queryAll
 
 enum class SyncDirection { UPLOAD, DOWNLOAD, CONFLICT, ERROR }
 
+const val SAVE_STATE_HISTORY_SUFFIX = " (Save states)"
+
 data class SyncHistoryEntry(
     val gameKey: String,
     val displayName: String,

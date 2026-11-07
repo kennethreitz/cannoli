@@ -31,6 +31,7 @@ class LibretroRunner {
     fun getAudioDiagnostics(): String = nativeAudioGetDiagnostics()
     fun stopAudio() = nativeAudioStop()
     fun setAudioMuted(muted: Boolean) = nativeAudioSetMuted(muted)
+    fun setAudioVolume(volume: Float) = nativeAudioSetVolume(volume)
     fun pauseAudio() = nativeAudioPause()
     fun resumeAudio() = nativeAudioResume()
 
@@ -74,6 +75,10 @@ class LibretroRunner {
 
     fun saveState(path: String): Boolean = nativeSaveState(path)
     fun loadState(path: String): Boolean = nativeLoadState(path)
+    fun captureRewindState(maxBytes: Int): Int = nativeCaptureRewindState(maxBytes)
+    fun rewind(steps: Int): Int = nativeRewind(steps)
+    fun getRewindStateCount(): Int = nativeGetRewindStateCount()
+    fun clearRewindHistory() = nativeClearRewindHistory()
     fun saveSRAM(path: String): Boolean = nativeSaveSRAM(path)
     fun loadSRAM(path: String): Boolean = nativeLoadSRAM(path)
 
@@ -149,12 +154,19 @@ class LibretroRunner {
 
     fun getMemoryDescriptors(): List<String> = nativeGetMemoryDescriptors().toList()
 
+    fun copyMemory(memoryId: Int, offset: Int, length: Int): ByteArray? =
+        nativeCopyMemory(memoryId, offset, length)
+
+    fun copyMappedMemory(address: Int, length: Int): ByteArray? =
+        nativeCopyMappedMemory(address, length)
+
     private external fun nativeLoadCore(corePath: String): Boolean
     private external fun nativeInit(systemDir: String, saveDir: String)
     private external fun nativeAudioInit(sampleRate: Int, contentFps: Double)
     private external fun nativeAudioGetDiagnostics(): String
     private external fun nativeAudioStop()
     private external fun nativeAudioSetMuted(muted: Boolean)
+    private external fun nativeAudioSetVolume(volume: Float)
     private external fun nativeAudioPause()
     private external fun nativeAudioResume()
     private external fun nativeLoadGame(romPath: String): IntArray?
@@ -172,6 +184,10 @@ class LibretroRunner {
     private external fun nativeCopyLastFrame(buffer: ByteBuffer)
     private external fun nativeSaveState(path: String): Boolean
     private external fun nativeLoadState(path: String): Boolean
+    private external fun nativeCaptureRewindState(maxBytes: Int): Int
+    private external fun nativeRewind(steps: Int): Int
+    private external fun nativeGetRewindStateCount(): Int
+    private external fun nativeClearRewindHistory()
     private external fun nativeSaveSRAM(path: String): Boolean
     private external fun nativeLoadSRAM(path: String): Boolean
     private external fun nativeApplyEmuCheats(codes: Array<String>)
@@ -192,4 +208,6 @@ class LibretroRunner {
     private external fun nativeGetDiskLabel(index: Int): String?
     private external fun nativeGetCoreLogs(): Array<String>
     private external fun nativeGetMemoryDescriptors(): Array<String>
+    private external fun nativeCopyMemory(memoryId: Int, offset: Int, length: Int): ByteArray?
+    private external fun nativeCopyMappedMemory(address: Int, length: Int): ByteArray?
 }

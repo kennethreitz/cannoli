@@ -13,6 +13,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 
+private val PPSSPP_SAVE_FILE = Regex(
+    """.*\.ppsspp(?: \[[^/\]\\]+])?\.zip$""",
+    RegexOption.IGNORE_CASE,
+)
+
 sealed interface PreLaunchOutcome {
     object Proceed : PreLaunchOutcome
     data class Conflict(
@@ -40,6 +45,8 @@ sealed interface RestoreOutcome {
     object PendingPromote : RestoreOutcome
 }
 
+data class ManualStateDownloadResult(val success: Boolean, val message: String)
+
 class SaveSyncService(
     private val client: RommClient,
     private val connStore: RommConnectionStore,
@@ -56,6 +63,10 @@ class SaveSyncService(
     private val statusHolder: SaveSyncStatusHolder,
     private val matcher: RommCacheMatcher,
     private val roms: dev.cannoli.scorza.db.RomsRepository,
+    private val standalone: StandaloneSaveBridge? = null,
+    private val libretroStates: LibretroStateBridge? = null,
+    private val retroArch: RetroArchSaveBridge? = null,
+    private val melonDs: MelonDsSaveBridge? = null,
 ) {
     private val paths: CannoliPaths get() = CannoliPaths(pathsProvider.root)
 
@@ -68,10 +79,173 @@ class SaveSyncService(
         if (!syncEnabled()) return null
         if (!RommCapabilities.isSupported(connStore.serverVersion)) return null
         if (registrar.deviceId().isNullOrEmpty()) return null
-        links.rommIdForPath(gameKey)?.let { return it }
         val tag = gameKey.substringBefore('/')
         val fileName = java.io.File(gameKey).name
+        if (tag.equals(StandaloneSaveKind.VITA3K.platformTag, ignoreCase = true)) {
+            val launcher = File(pathsProvider.romDir, gameKey)
+            if (!launcher.extension.equals("psvita", ignoreCase = true)) return null
+        }
+        links.rommIdForPath(gameKey)?.let { return it }
+        if (tag.equals(StandaloneSaveKind.VITA3K.platformTag, ignoreCase = true)) {
+            val launcher = File(pathsProvider.romDir, gameKey)
+            StandaloneTitleIdParser.vita3kTitleId(launcher)?.let { titleId ->
+                matcher.rommIdForTitleId(tag, titleId)?.let { return it }
+            }
+        }
         return matcher.rommIdFor(tag, fileName)
+    }
+
+    fun canDownloadSaveStates(gameKey: String): Boolean =
+        isSyncableGame(gameKey) != null && supportsSaveStateSync(gameKey)
+
+    // Save states are intentionally excluded from RomM sync. Keep the bridge code dormant so
+    // existing local/server state files are neither migrated nor deleted during this rollback.
+    private fun supportsSaveStateSync(@Suppress("UNUSED_PARAMETER") gameKey: String): Boolean = false
+
+    private fun standaloneKind(tag: String, emulator: String?): StandaloneSaveKind? =
+        standalone?.kindFor(tag, emulator)
+
+    private fun saveMode(tag: String, emulator: String?): LocalSaveMode {
+        if (isPpssppDirectorySave(tag, emulator)) {
+            return LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE
+        }
+        return standalone?.archiveMode(standaloneKind(tag, emulator)) ?: LocalSaveMode.NORMAL
+    }
+
+    private fun isPpssppDirectorySave(tag: String, emulator: String?): Boolean =
+        tag.equals("PSP", ignoreCase = true) &&
+            emulator?.contains("PPSSPP", ignoreCase = true) == true
+
+    private fun resolveLocal(
+        tag: String,
+        base: String,
+        gameKey: String,
+        emulator: String?,
+        refresh: Boolean = true,
+    ): LocalSave? {
+        val kind = standaloneKind(tag, emulator)
+        if (kind == null) {
+            if (saveMode(tag, emulator) == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE) {
+                if (refresh) {
+                    when (val result = retroArch?.refreshPpsspp(tag, base, gameKey)) {
+                        RetroArchMirrorResult.Ready -> Unit
+                        RetroArchMirrorResult.Missing -> return null
+                        is RetroArchMirrorResult.Unavailable -> {
+                            dev.cannoli.scorza.util.RommLog.write(
+                                "PPSSPP save unavailable [$base]: ${result.reason}",
+                            )
+                            return null
+                        }
+                        null -> return null
+                    }
+                }
+                return resolver.resolve(tag, base, LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE)
+            }
+            if (melonDs?.supports(tag, emulator, gameKey) == true && refresh) {
+                when (val result = melonDs.refresh(tag, base, gameKey)) {
+                    RetroArchMirrorResult.Ready -> Unit
+                    RetroArchMirrorResult.Missing -> return null
+                    is RetroArchMirrorResult.Unavailable -> {
+                        dev.cannoli.scorza.util.RommLog.write(
+                            "melonDS save unavailable [$base]: ${result.reason}",
+                        )
+                        return null
+                    }
+                }
+            }
+            if (retroArch?.supports(gameKey) == true && refresh) {
+                when (val result = retroArch.refreshSaves(tag, base, gameKey)) {
+                    RetroArchMirrorResult.Ready, RetroArchMirrorResult.Missing -> Unit
+                    is RetroArchMirrorResult.Unavailable -> {
+                        dev.cannoli.scorza.util.RommLog.write(
+                            "RetroArch save unavailable [$base]: ${result.reason}",
+                        )
+                        return null
+                    }
+                }
+            }
+            return resolver.resolve(tag, base)
+        }
+        if (standalone?.isLinked(kind) != true) return null
+        if (refresh) {
+            when (val result = standalone.refreshMirror(kind, gameKey, base)) {
+                is StandaloneMirrorResult.Ready -> Unit
+                StandaloneMirrorResult.Missing -> return null
+                is StandaloneMirrorResult.Unavailable -> {
+                    dev.cannoli.scorza.util.RommLog.write(
+                        "standalone save unavailable [$base/${kind.emulatorName}]: ${result.reason}",
+                    )
+                    return null
+                }
+            }
+        }
+        return resolver.resolve(tag, base, standalone.archiveMode(kind))
+    }
+
+    private fun resolveSlotLocal(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        emulator: String?,
+        refresh: Boolean = true,
+    ): LocalSave? {
+        if (libretroStates?.isStateSlot(slot) == true) {
+            if (!supportsSaveStateSync(gameKey)) return null
+            return resolveStateLocal(tag, base, gameKey)
+        }
+        return resolveLocal(tag, base, gameKey, emulator, refresh)
+    }
+
+    private fun resolveStateLocal(tag: String, base: String, gameKey: String): LocalSave? {
+        if (!supportsSaveStateSync(gameKey)) return null
+        val bridge = libretroStates ?: return null
+        if (bridge.isGameActive()) return null
+        when (val result = retroArch?.refreshStates(tag, base, gameKey)) {
+            RetroArchMirrorResult.Ready, RetroArchMirrorResult.Missing -> Unit
+            is RetroArchMirrorResult.Unavailable -> {
+                dev.cannoli.scorza.util.RommLog.write(
+                    "RetroArch save state unavailable [$base]: ${result.reason}",
+                )
+                return null
+            }
+            null -> return null
+        }
+        return bridge.refreshArchive(tag, base, gameKey)
+    }
+
+    private fun applyDownloaded(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        emulator: String?,
+        downloaded: File,
+    ) {
+        if (libretroStates?.isStateSlot(slot) == true) {
+            check(supportsSaveStateSync(gameKey)) {
+                "save-state sync is disabled"
+            }
+            libretroStates.applyArchive(tag, base, gameKey, downloaded)
+            retroArch?.applyStates(tag, base, gameKey)
+            return
+        }
+        val kind = standaloneKind(tag, emulator)
+        val mode = saveMode(tag, emulator)
+        resolver.applyDownload(tag, base, downloaded, mode)
+        if (kind != null) {
+            val archive = resolver.resolve(tag, base, mode)?.files?.singleOrNull()
+                ?: throw IllegalStateException("standalone save archive was not staged")
+            standalone?.applyMirror(kind, gameKey, archive)
+                ?: throw IllegalStateException("${kind.emulatorName} save bridge is unavailable")
+        } else if (mode == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE) {
+            retroArch?.applyPpsspp(tag, base, gameKey)
+                ?: throw IllegalStateException("PPSSPP save bridge is unavailable")
+        } else if (melonDs?.supports(tag, emulator, gameKey) == true) {
+            melonDs.apply(tag, base, gameKey)
+        } else if (retroArch?.supports(gameKey) == true) {
+            retroArch.applySaves(tag, base, gameKey)
+        }
     }
 
     private fun negotiate(romId: Int, slot: String, emulator: String?, local: LocalSave, anchor: SaveSyncRow?, deviceId: String): SyncNegotiateResponse? = try {
@@ -84,7 +258,7 @@ class SaveSyncService(
                         fileName = local.uploadFileName,
                         slot = slot,
                         emulator = emulator,
-                        contentHash = anchor?.lastUploadedHash,
+                        contentHash = local.contentHash,
                         updatedAt = isoOf(local.modifiedMillis),
                         fileSizeBytes = local.sizeBytes,
                     )
@@ -92,14 +266,25 @@ class SaveSyncService(
             )
         )
     } catch (t: Throwable) {
+        dev.cannoli.scorza.util.RommLog.write("negotiate failed [$romId/$slot]: ${errLabel(t)}")
         null
     }
 
     // RomM keeps every save as its own append-only row, so the newest one is the head. Ordering by
     // id breaks ties when a server hands back timestamps we cannot parse.
-    private fun headSaveFor(saves: List<RommSaveDto>, slot: String): RommSaveDto? =
-        saves.filter { (it.slot ?: DEFAULT_SLOT) == slot }
+    private fun headSaveFor(
+        saves: List<RommSaveDto>,
+        slot: String,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ): RommSaveDto? =
+        saves.filter {
+            (it.slot ?: DEFAULT_SLOT) == slot && isCompatibleSaveFile(it.fileName, mode)
+        }
             .maxWithOrNull(compareBy({ savedAtMillis(it.updatedAt) }, { it.id }))
+
+    private fun isCompatibleSaveFile(fileName: String, mode: LocalSaveMode): Boolean =
+        mode != LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE ||
+            PPSSPP_SAVE_FILE.matches(fileName)
 
     private fun savedAtMillis(updatedAt: String): Long = try {
         java.time.OffsetDateTime.parse(updatedAt).toInstant().toEpochMilli()
@@ -131,52 +316,558 @@ class SaveSyncService(
             op.serverContentHash != null &&
             op.serverContentHash != local.contentHash
 
+    // RomM may base an operation on mtimes even when neither side's content has changed. This is
+    // especially common for standalone-emulator bundles: RomM's stored archive hash can differ
+    // from Cannoli's logical local hash, so compare each side with its own last-confirmed anchor.
+    private fun isAnchoredNoOp(op: SyncOperationDto?, anchor: SaveSyncRow?, local: LocalSave): Boolean =
+        anchor != null &&
+            anchor.localContentHash == local.contentHash &&
+            op?.serverContentHash != null &&
+            anchor.lastUploadedHash == op.serverContentHash
+
     suspend fun syncBeforeLaunch(tag: String, base: String, gameKey: String, emulator: String?): PreLaunchOutcome =
         withContext(Dispatchers.IO) {
             val romId = isSyncableGame(gameKey) ?: return@withContext PreLaunchOutcome.Proceed
             val deviceId = registrar.deviceId() ?: return@withContext PreLaunchOutcome.Proceed
+            standaloneKind(tag, emulator)?.let { kind ->
+                if (standalone?.isLinked(kind) != true) {
+                    dev.cannoli.scorza.util.RommLog.write(
+                        "launch [$base]: ${kind.emulatorName} save sync skipped, folder not connected",
+                    )
+                    return@withContext PreLaunchOutcome.Proceed
+                }
+                if (standalone.isGameActive()) return@withContext PreLaunchOutcome.Proceed
+            }
+            if (supportsSaveStateSync(gameKey) && libretroStates?.isGameActive() != true) {
+                val stateResult = syncNativeState(tag, base, gameKey, romId, emulator, deviceId)
+                stateResult.conflict?.let { return@withContext it }
+            }
             val slot = store.activeSlot(gameKey)
-            val local = resolver.resolve(tag, base)
-            val anchor = store.get(gameKey, slot)
-            if (local == null) {
-                // No local save: if we previously synced this game, the local copy was deleted -> pull it back.
-                return@withContext if (anchor != null) {
-                    regenerateFromServer(tag, base, gameKey, slot, romId, deviceId)
-                } else {
-                    PreLaunchOutcome.Proceed
-                }
-            }
-            val response = negotiate(romId, slot, emulator, local, anchor, deviceId)
-                ?: return@withContext PreLaunchOutcome.Proceed
-            val op = response.operations.firstOrNull { (it.slot ?: DEFAULT_SLOT) == slot }
-            dev.cannoli.scorza.util.RommLog.write("launch [$base]: negotiate slot=$slot op=${op?.action ?: "none"} serverHash=${op?.serverContentHash?.take(8)} anchorHash=${anchor?.lastUploadedHash?.take(8)}")
-            val outcome = when (op?.action) {
-                "download" -> downloadOp(tag, base, gameKey, slot, romId, deviceId, op).also {
-                    if (it == PreLaunchOutcome.Proceed) {
-                        dev.cannoli.scorza.util.RommLog.write("launch [$base]: downloaded server save")
-                    }
-                }
-                "upload" -> if (isStuckUpload(op, anchor, local)) {
-                    dev.cannoli.scorza.util.RommLog.write("launch [$base]: upload cannot converge, surfacing conflict")
-                    buildConflict(op, local, slot, romId, tag, base, gameKey, emulator)
-                } else {
-                    try {
-                        uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = false)
-                        dev.cannoli.scorza.util.RommLog.write("launch [$base]: uploaded local save")
-                    } catch (t: Throwable) {
-                        val code = (t as? dev.cannoli.scorza.romm.RommException)?.statusCode
-                        dev.cannoli.scorza.util.RommLog.write("launch [$base]: upload failed ${code ?: t.message}")
-                    }
-                    PreLaunchOutcome.Proceed
-                }
-                "conflict" -> buildConflict(op, local, slot, romId, tag, base, gameKey, emulator)
-                else -> PreLaunchOutcome.Proceed
-            }
-            val completed = if (outcome == PreLaunchOutcome.Proceed && (op?.action == "download" || op?.action == "upload")) 1 else 0
-            val failed = if (outcome is PreLaunchOutcome.KnownStaleBlock) 1 else 0
-            runCatching { client.completeSyncSession(response.sessionId, SyncCompletePayload(operationsCompleted = completed, operationsFailed = failed)) }
-            outcome
+            val local = resolveLocal(tag, base, gameKey, emulator)
+            syncPayloadBeforeLaunch(tag, base, gameKey, slot, romId, emulator, deviceId, local)
         }
+
+    private data class NativeStateSyncResult(
+        val direction: SyncDirection? = null,
+        val ok: Boolean = true,
+        val label: String,
+        val conflict: PreLaunchOutcome.Conflict? = null,
+    )
+
+    private fun syncNativeState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        romId: Int,
+        emulator: String?,
+        deviceId: String,
+    ): NativeStateSyncResult {
+        if (!supportsSaveStateSync(gameKey)) {
+            return NativeStateSyncResult(label = "save-state sync disabled")
+        }
+        val bridge = libretroStates
+            ?: return NativeStateSyncResult(label = "save-state sync unavailable")
+        val slot = bridge.slot(gameKey)
+        val remoteFileName = bridge.remoteFileName(gameKey, base)
+            ?: return NativeStateSyncResult(label = "not a Libretro game")
+        val local = resolveStateLocal(tag, base, gameKey)
+        val anchor = store.get(gameKey, slot)
+        val states = try {
+            client.getStates(romId)
+        } catch (t: Throwable) {
+            return NativeStateSyncResult(ok = false, label = "state lookup failed (${errLabel(t)})")
+        }
+        val server = states.firstOrNull { it.fileName == remoteFileName }
+        if (server != null && local != null) {
+            retireLegacyStateSaves(base, romId, slot, deviceId)
+        }
+        val interoperable = newestInteroperableState(states, remoteFileName, emulator)
+        if (interoperable != null &&
+            (server == null || stateTimeMillis(interoperable) > stateTimeMillis(server))
+        ) {
+            return importRawNativeState(
+                tag, base, gameKey, slot, romId, emulator, deviceId, interoperable, force = false,
+            )
+        }
+
+        if (server == null) {
+            val legacy = findLegacyState(base, gameKey, romId, slot, deviceId)
+            if (legacy != null) {
+                return try {
+                    val result = importLegacyState(
+                        tag, base, gameKey, slot, romId, emulator, deviceId, legacy, force = false,
+                    )
+                    if (result.ok) {
+                        retireLegacyStateSaves(base, romId, slot, deviceId)
+                    }
+                    result
+                } finally {
+                    legacy.file.delete()
+                }
+            }
+            if (local == null) return NativeStateSyncResult(label = "no save states")
+            return try {
+                uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+                NativeStateSyncResult(SyncDirection.UPLOAD, label = "uploaded save states")
+            } catch (t: Throwable) {
+                NativeStateSyncResult(SyncDirection.UPLOAD, false, "state upload failed (${errLabel(t)})")
+            }
+        }
+
+        if (local == null) {
+            return downloadNativeState(tag, base, gameKey, slot, romId, emulator, server)
+        }
+
+        val serverTime = server.updatedAt.ifEmpty { server.createdAt }
+        val serverChanged = anchor == null ||
+            anchor.rommSaveId != server.id ||
+            anchor.serverUpdatedAt != serverTime
+        val localChanged = anchor == null || anchor.localContentHash != local.contentHash
+        if (!serverChanged && !localChanged) {
+            return NativeStateSyncResult(label = "save states up to date")
+        }
+        if (localChanged && !serverChanged) {
+            return try {
+                uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+                NativeStateSyncResult(SyncDirection.UPLOAD, label = "uploaded save states")
+            } catch (t: Throwable) {
+                NativeStateSyncResult(SyncDirection.UPLOAD, false, "state upload failed (${errLabel(t)})")
+            }
+        }
+        if (!localChanged && serverChanged) {
+            return downloadNativeState(tag, base, gameKey, slot, romId, emulator, server)
+        }
+
+        val serverHash = try {
+            downloadNativeStateHash(base, gameKey, server.id)
+        } catch (t: Throwable) {
+            return NativeStateSyncResult(SyncDirection.DOWNLOAD, false, "state download failed (${errLabel(t)})")
+        }
+        if (serverHash == local.contentHash) {
+            recordNativeStateAnchor(gameKey, slot, romId, server, serverHash)
+            return NativeStateSyncResult(label = "save states up to date")
+        }
+        if (anchor == null) {
+            return if (local.modifiedMillis > savedAtMillis(serverTime)) {
+                try {
+                    uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+                    NativeStateSyncResult(SyncDirection.UPLOAD, label = "uploaded newer save states")
+                } catch (t: Throwable) {
+                    NativeStateSyncResult(SyncDirection.UPLOAD, false, "state upload failed (${errLabel(t)})")
+                }
+            } else {
+                downloadNativeState(tag, base, gameKey, slot, romId, emulator, server, serverHash)
+            }
+        }
+        val serverMillis = savedAtMillis(serverTime)
+        if (serverMillis > local.modifiedMillis) {
+            return downloadNativeState(tag, base, gameKey, slot, romId, emulator, server, serverHash)
+        }
+        if (local.modifiedMillis > serverMillis && serverMillis > 0L) {
+            return try {
+                uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+                NativeStateSyncResult(SyncDirection.UPLOAD, label = "uploaded newer save states")
+            } catch (t: Throwable) {
+                NativeStateSyncResult(SyncDirection.UPLOAD, false, "state upload failed (${errLabel(t)})")
+            }
+        }
+
+        return NativeStateSyncResult(
+            direction = SyncDirection.CONFLICT,
+            label = "save-state conflict",
+            conflict = PreLaunchOutcome.Conflict(
+                gameKey = gameKey,
+                slot = slot,
+                localTime = isoOf(local.modifiedMillis),
+                serverTime = serverTime,
+                serverDevice = null,
+                saveId = server.id,
+                romId = romId,
+                tag = tag,
+                base = base,
+                emulator = emulator,
+                serverContentHash = serverHash,
+                reason = "save states changed on both sides",
+            ),
+        )
+    }
+
+    private data class LegacyState(
+        val save: RommSaveDto,
+        val file: File,
+        val contentHash: String,
+    )
+
+    private fun newestInteroperableState(
+        states: List<RommStateDto>,
+        bundleFileName: String,
+        emulator: String?,
+    ): RommStateDto? = states
+        .asSequence()
+        .filter { it.fileName != bundleFileName }
+        .filter { it.fileName.lowercase().matches(Regex(""".*\.state(?:\.auto|[1-9])?$""")) }
+        .filter { remoteEmulatorMatches(it.emulator, emulator) }
+        .maxWithOrNull(compareBy({ stateTimeMillis(it) }, { it.id }))
+
+    private fun remoteEmulatorMatches(remote: String?, local: String?): Boolean {
+        if (remote.isNullOrBlank() || local.isNullOrBlank()) return true
+        fun normalized(value: String) = value.lowercase().filter(Char::isLetterOrDigit)
+        val remoteKey = normalized(remote)
+        val localKey = normalized(local)
+        return remoteKey == localKey || remoteKey.contains(localKey) || localKey.contains(remoteKey)
+    }
+
+    private fun stateTimeMillis(state: RommStateDto): Long =
+        savedAtMillis(state.updatedAt.ifEmpty { state.createdAt })
+
+    private fun findLegacyState(
+        base: String,
+        gameKey: String,
+        romId: Int,
+        slot: String,
+        deviceId: String,
+    ): LegacyState? {
+        val saves = try {
+            client.getSaves(romId, deviceId)
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "legacy state lookup failed [$base]: ${errLabel(t)}",
+            )
+            return null
+        }
+        val candidates = saves.filter { (it.slot ?: DEFAULT_SLOT) == slot }
+            .sortedWith(compareByDescending<RommSaveDto> { savedAtMillis(it.updatedAt) }.thenByDescending { it.id })
+        for (save in candidates) {
+            val tmp = File.createTempFile("romm-legacy-state", ".bin", paths.configCache.apply { mkdirs() })
+            try {
+                client.downloadSaveContent(save.id, deviceId, tmp)
+                verifyDownloaded(tmp, save.contentHash)
+                libretroStates?.validateArchive(base, gameKey, tmp)
+                    ?: throw IllegalStateException("save-state bridge unavailable")
+                return LegacyState(save, tmp, SaveHasher.hashFile(tmp))
+            } catch (t: Throwable) {
+                dev.cannoli.scorza.util.RommLog.write(
+                    "legacy state skipped [$base/id=${save.id}]: ${errLabel(t)}",
+                )
+                tmp.delete()
+            }
+        }
+        return null
+    }
+
+    private fun retireLegacyStateSaves(
+        base: String,
+        romId: Int,
+        slot: String,
+        deviceId: String,
+    ) {
+        val legacyIds = try {
+            client.getSaves(romId, deviceId)
+                .filter { (it.slot ?: DEFAULT_SLOT) == slot }
+                .map { it.id }
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "legacy state cleanup lookup failed [$base]: ${errLabel(t)}",
+            )
+            return
+        }
+        if (legacyIds.isEmpty()) return
+        try {
+            client.deleteSaves(legacyIds)
+            dev.cannoli.scorza.util.RommLog.write(
+                "retired ${legacyIds.size} legacy save-state row(s) [$base]",
+            )
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "legacy state cleanup failed [$base]: ${errLabel(t)}",
+            )
+        }
+    }
+
+    private fun importLegacyState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        emulator: String?,
+        deviceId: String,
+        legacy: LegacyState,
+        force: Boolean,
+    ): NativeStateSyncResult {
+        val local = resolveStateLocal(tag, base, gameKey)
+        val serverMillis = savedAtMillis(legacy.save.updatedAt)
+        if (!force && local != null && local.contentHash != legacy.contentHash &&
+            local.modifiedMillis > serverMillis && serverMillis > 0L
+        ) {
+            return uploadLocalNativeState(
+                tag, base, gameKey, slot, romId, emulator, deviceId, "uploaded newer save states",
+            )
+        }
+        return try {
+            backupBeforeDownload(tag, base, gameKey, slot, emulator)
+            applyDownloaded(tag, base, gameKey, slot, emulator, legacy.file)
+            uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+            NativeStateSyncResult(SyncDirection.DOWNLOAD, label = "imported server save states")
+        } catch (t: Throwable) {
+            NativeStateSyncResult(
+                SyncDirection.DOWNLOAD,
+                false,
+                "state import failed (${errLabel(t)})",
+            )
+        }
+    }
+
+    private fun importRawNativeState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        emulator: String?,
+        deviceId: String,
+        server: RommStateDto,
+        force: Boolean,
+    ): NativeStateSyncResult {
+        val local = resolveStateLocal(tag, base, gameKey)
+        val serverMillis = stateTimeMillis(server)
+        if (!force && local != null && local.modifiedMillis > serverMillis && serverMillis > 0L) {
+            return uploadLocalNativeState(
+                tag, base, gameKey, slot, romId, emulator, deviceId, "uploaded newer save states",
+            )
+        }
+        val tmp = File.createTempFile("romm-raw-state", ".bin", paths.configCache.apply { mkdirs() })
+        return try {
+            statusHolder.setActive(SaveSyncStatus.DOWNLOADING)
+            client.downloadStateContent(server.id, tmp)
+            verifyDownloaded(tmp, null)
+            backupBeforeDownload(tag, base, gameKey, slot, emulator)
+            libretroStates?.applyRawState(tag, base, gameKey, tmp)
+                ?: throw IllegalStateException("save-state bridge unavailable")
+            if (retroArch?.supports(gameKey) == true) {
+                retroArch.applyStates(tag, base, gameKey)
+            }
+            uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+            NativeStateSyncResult(SyncDirection.DOWNLOAD, label = "downloaded server save state")
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "raw state download aborted [$base/id=${server.id}]: ${t.message}",
+            )
+            NativeStateSyncResult(
+                SyncDirection.DOWNLOAD,
+                false,
+                "state download failed (${errLabel(t)})",
+            )
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun uploadLocalNativeState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        emulator: String?,
+        deviceId: String,
+        label: String,
+    ): NativeStateSyncResult = try {
+        uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = true)
+        NativeStateSyncResult(SyncDirection.UPLOAD, label = label)
+    } catch (t: Throwable) {
+        NativeStateSyncResult(SyncDirection.UPLOAD, false, "state upload failed (${errLabel(t)})")
+    }
+
+    suspend fun downloadLatestSaveState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        emulator: String?,
+    ): ManualStateDownloadResult = withContext(Dispatchers.IO) {
+        if (!supportsSaveStateSync(gameKey)) {
+            return@withContext ManualStateDownloadResult(
+                false,
+                "Save-state sync is disabled",
+            )
+        }
+        val bridge = libretroStates
+            ?: return@withContext ManualStateDownloadResult(false, "Save-state sync is unavailable")
+        if (bridge.isGameActive()) {
+            return@withContext ManualStateDownloadResult(false, "Close the game before downloading its save state")
+        }
+        val romId = isSyncableGame(gameKey)
+            ?: return@withContext ManualStateDownloadResult(false, "This game is not linked to RomM")
+        val deviceId = registrar.deviceId()
+            ?: return@withContext ManualStateDownloadResult(false, "This device is not registered with RomM")
+        val slot = bridge.slot(gameKey)
+        val remoteFileName = bridge.remoteFileName(gameKey, base)
+            ?: return@withContext ManualStateDownloadResult(false, "This game is not using Libretro")
+        val states = try {
+            client.getStates(romId)
+        } catch (t: Throwable) {
+            return@withContext ManualStateDownloadResult(false, "Could not check RomM: ${errLabel(t)}")
+        }
+        val bundle = states.firstOrNull { it.fileName == remoteFileName }
+        val raw = newestInteroperableState(states, remoteFileName, emulator)
+        val newest = listOfNotNull(bundle, raw)
+            .maxWithOrNull(compareBy({ stateTimeMillis(it) }, { it.id }))
+        val result = when {
+            newest == null -> {
+                val legacy = findLegacyState(base, gameKey, romId, slot, deviceId)
+                    ?: return@withContext ManualStateDownloadResult(false, "No compatible save state was found on RomM")
+                try {
+                    importLegacyState(
+                        tag, base, gameKey, slot, romId, emulator, deviceId, legacy, force = true,
+                    )
+                } finally {
+                    legacy.file.delete()
+                }
+            }
+            newest.fileName == remoteFileName ->
+                downloadNativeState(tag, base, gameKey, slot, romId, emulator, newest)
+            else -> importRawNativeState(
+                tag, base, gameKey, slot, romId, emulator, deviceId, newest, force = true,
+            )
+        }
+        ManualStateDownloadResult(
+            result.ok,
+            if (result.ok) "Latest RomM save state downloaded" else result.label,
+        )
+    }
+
+    private fun downloadNativeStateHash(base: String, gameKey: String, stateId: Int): String {
+        val tmp = File.createTempFile("romm-state", ".bin", paths.configCache.apply { mkdirs() })
+        return try {
+            client.downloadStateContent(stateId, tmp)
+            verifyDownloaded(tmp, null)
+            libretroStates?.validateArchive(base, gameKey, tmp)
+                ?: throw IllegalStateException("save-state bridge unavailable")
+            SaveHasher.hashFile(tmp)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun downloadNativeState(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        emulator: String?,
+        server: RommStateDto,
+        knownHash: String? = null,
+    ): NativeStateSyncResult {
+        val tmp = File.createTempFile("romm-state", ".bin", paths.configCache.apply { mkdirs() })
+        return try {
+            statusHolder.setActive(SaveSyncStatus.DOWNLOADING)
+            client.downloadStateContent(server.id, tmp)
+            verifyDownloaded(tmp, knownHash)
+            libretroStates?.validateArchive(base, gameKey, tmp)
+                ?: throw IllegalStateException("save-state bridge unavailable")
+            val serverHash = knownHash ?: SaveHasher.hashFile(tmp)
+            backupBeforeDownload(tag, base, gameKey, slot, emulator)
+            applyDownloaded(tag, base, gameKey, slot, emulator, tmp)
+            recordNativeStateAnchor(gameKey, slot, romId, server, serverHash)
+            NativeStateSyncResult(SyncDirection.DOWNLOAD, label = "downloaded save states")
+        } catch (t: Throwable) {
+            dev.cannoli.scorza.util.RommLog.write("state download aborted [$base]: ${t.message}")
+            NativeStateSyncResult(SyncDirection.DOWNLOAD, false, "state download failed (${errLabel(t)})")
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun recordNativeStateAnchor(
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        server: RommStateDto,
+        contentHash: String,
+    ) {
+        val serverTime = server.updatedAt.ifEmpty { server.createdAt }
+        store.upsert(
+            SaveSyncRow(
+                gameKey = gameKey,
+                slot = slot,
+                rommRomId = romId,
+                rommSaveId = server.id,
+                lastSyncedAt = serverTime,
+                lastUploadedHash = contentHash,
+                localContentHash = contentHash,
+                serverUpdatedAt = serverTime,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    private fun syncPayloadBeforeLaunch(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        romId: Int,
+        emulator: String?,
+        deviceId: String,
+        local: LocalSave?,
+    ): PreLaunchOutcome {
+        val anchor = store.get(gameKey, slot)
+        if (local == null) {
+            // A server save may exist before this device has ever synced the game.
+            // Check RomM on launch instead of waiting for the next background sweep.
+            return regenerateFromServer(tag, base, gameKey, slot, romId, emulator, deviceId)
+        }
+        val response = negotiate(romId, slot, emulator, local, anchor, deviceId)
+            ?: return PreLaunchOutcome.Proceed
+        val rawOp = response.operations.firstOrNull { (it.slot ?: DEFAULT_SLOT) == slot }
+        val mode = saveMode(tag, emulator)
+        val op = rawOp?.takeIf { isCompatibleSaveFile(it.fileName, mode) }
+        if (rawOp != null && op == null) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "launch [$base]: ignored incompatible server save ${rawOp.fileName}",
+            )
+        }
+        dev.cannoli.scorza.util.RommLog.write("launch [$base]: negotiate slot=$slot op=${op?.action ?: "none"} serverHash=${op?.serverContentHash?.take(8)} anchorHash=${anchor?.lastUploadedHash?.take(8)}")
+        if (isAnchoredNoOp(op, anchor, local)) {
+            dev.cannoli.scorza.util.RommLog.write(
+                "launch [$base]: ignored timestamp-only ${op?.action} verdict; content anchors are unchanged",
+            )
+            runCatching {
+                client.completeSyncSession(
+                    response.sessionId,
+                    SyncCompletePayload(operationsCompleted = 1, operationsFailed = 0),
+                )
+            }
+            return PreLaunchOutcome.Proceed
+        }
+        val outcome = when (op?.action) {
+            "download" -> downloadOp(tag, base, gameKey, slot, romId, emulator, deviceId, op).also {
+                if (it == PreLaunchOutcome.Proceed) {
+                    dev.cannoli.scorza.util.RommLog.write("launch [$base]: downloaded server save")
+                }
+            }
+            "upload" -> if (isStuckUpload(op, anchor, local)) {
+                dev.cannoli.scorza.util.RommLog.write("launch [$base]: upload cannot converge, surfacing conflict")
+                buildConflict(op, local, slot, romId, tag, base, gameKey, emulator)
+            } else {
+                try {
+                    uploadActive(tag, base, gameKey, slot, romId, emulator, deviceId, overwrite = false)
+                    dev.cannoli.scorza.util.RommLog.write("launch [$base]: uploaded local save")
+                } catch (t: Throwable) {
+                    val code = (t as? dev.cannoli.scorza.romm.RommException)?.statusCode
+                    dev.cannoli.scorza.util.RommLog.write("launch [$base]: upload failed ${code ?: t.message}")
+                }
+                PreLaunchOutcome.Proceed
+            }
+            "conflict" -> buildConflict(op, local, slot, romId, tag, base, gameKey, emulator)
+            else -> PreLaunchOutcome.Proceed
+        }
+        val completed = if (outcome == PreLaunchOutcome.Proceed && (op?.action == "download" || op?.action == "upload")) 1 else 0
+        val failed = if (outcome is PreLaunchOutcome.KnownStaleBlock) 1 else 0
+        runCatching { client.completeSyncSession(response.sessionId, SyncCompletePayload(operationsCompleted = completed, operationsFailed = failed)) }
+        return outcome
+    }
 
     private fun downloadOp(
         tag: String,
@@ -184,6 +875,7 @@ class SaveSyncService(
         gameKey: String,
         slot: String,
         romId: Int,
+        emulator: String?,
         deviceId: String,
         op: SyncOperationDto,
     ): PreLaunchOutcome {
@@ -193,10 +885,10 @@ class SaveSyncService(
         return try {
             client.downloadSaveContent(saveId, deviceId, tmp)
             verifyDownloaded(tmp, op.serverContentHash)
-            backupBeforeDownload(tag, base)
-            resolver.applyDownload(tag, base, tmp)
+            backupBeforeDownload(tag, base, gameKey, slot, emulator)
+            applyDownloaded(tag, base, gameKey, slot, emulator, tmp)
             val confirmed = runCatching { client.confirmSaveDownloaded(saveId, deviceId) }.getOrNull()
-            val hash = resolver.resolve(tag, base)?.contentHash
+            val hash = resolveSlotLocal(tag, base, gameKey, slot, emulator, refresh = false)?.contentHash
             // We verified non-empty bytes a moment ago, so an empty read-back means the storage
             // handed us stale or partial content. Recording it would anchor the game to a hash the
             // save does not have and make every later sweep call it up to date.
@@ -232,6 +924,7 @@ class SaveSyncService(
         gameKey: String,
         slot: String,
         romId: Int,
+        emulator: String?,
         deviceId: String,
     ): PreLaunchOutcome {
         val serverSaves = try {
@@ -239,10 +932,11 @@ class SaveSyncService(
         } catch (t: Throwable) {
             return PreLaunchOutcome.Proceed
         }
-        val save = headSaveFor(serverSaves, slot) ?: return PreLaunchOutcome.Proceed
-        val outcome = downloadOp(tag, base, gameKey, slot, romId, deviceId, downloadOpFor(save, romId, slot))
+        val save = headSaveFor(serverSaves, slot, saveMode(tag, emulator))
+            ?: return PreLaunchOutcome.Proceed
+        val outcome = downloadOp(tag, base, gameKey, slot, romId, emulator, deviceId, downloadOpFor(save, romId, slot))
         if (outcome == PreLaunchOutcome.Proceed) {
-            dev.cannoli.scorza.util.RommLog.write("launch [$base]: regenerated save (local was deleted)")
+            dev.cannoli.scorza.util.RommLog.write("launch [$base]: pulled server save (local missing)")
         }
         return outcome
     }
@@ -250,12 +944,21 @@ class SaveSyncService(
     suspend fun applyConflictUseServer(c: PreLaunchOutcome.Conflict, deviceId: String) = withContext(Dispatchers.IO) {
         val tmp = File.createTempFile("romm-save", ".bin", paths.configCache.apply { mkdirs() })
         try {
-            client.downloadSaveContent(c.saveId, deviceId, tmp)
+            val statePayload = libretroStates?.isStateSlot(c.slot) == true
+            if (statePayload && !supportsSaveStateSync(c.gameKey)) {
+                throw IllegalStateException("save-state sync is disabled")
+            }
+            if (statePayload) {
+                client.downloadStateContent(c.saveId, tmp)
+            } else {
+                client.downloadSaveContent(c.saveId, deviceId, tmp)
+            }
             verifyDownloaded(tmp, c.serverContentHash)
-            backupBeforeDownload(c.tag, c.base)
-            resolver.applyDownload(c.tag, c.base, tmp)
-            val confirmed = runCatching { client.confirmSaveDownloaded(c.saveId, deviceId) }.getOrNull()
-            val hash = resolver.resolve(c.tag, c.base)?.contentHash
+            backupBeforeDownload(c.tag, c.base, c.gameKey, c.slot, c.emulator)
+            applyDownloaded(c.tag, c.base, c.gameKey, c.slot, c.emulator, tmp)
+            val confirmed = if (statePayload) null
+            else runCatching { client.confirmSaveDownloaded(c.saveId, deviceId) }.getOrNull()
+            val hash = resolveSlotLocal(c.tag, c.base, c.gameKey, c.slot, c.emulator, refresh = false)?.contentHash
             store.upsert(
                 SaveSyncRow(
                     gameKey = c.gameKey,
@@ -263,7 +966,7 @@ class SaveSyncService(
                     rommRomId = c.romId,
                     rommSaveId = c.saveId,
                     lastSyncedAt = c.serverTime,
-                    lastUploadedHash = confirmed?.contentHash ?: hash,
+                    lastUploadedHash = c.serverContentHash ?: confirmed?.contentHash ?: hash,
                     localContentHash = hash,
                     serverUpdatedAt = c.serverTime,
                     updatedAt = System.currentTimeMillis(),
@@ -278,14 +981,40 @@ class SaveSyncService(
         uploadActive(c.tag, c.base, c.gameKey, c.slot, c.romId, c.emulator, deviceId, overwrite = true)
     }
 
-    fun backupBeforeDownload(tag: String, base: String) =
-        backupManager.backup(tag, base, settings.rommSaveBackupCount, System.currentTimeMillis())
+    fun backupBeforeDownload(
+        tag: String,
+        base: String,
+        gameKey: String? = null,
+        slot: String = DEFAULT_SLOT,
+        emulator: String? = null,
+    ) {
+        if (libretroStates?.isStateSlot(slot) == true) {
+            val key = requireNotNull(gameKey) { "game key is required for save-state backups" }
+            if (!supportsSaveStateSync(key)) return
+            resolveStateLocal(tag, base, key)
+            libretroStates.backupCurrent(tag, base, key, settings.rommSaveBackupCount)
+            return
+        }
+        if (gameKey != null) resolveLocal(tag, base, gameKey, emulator)
+        backupManager.backup(
+            tag,
+            base,
+            settings.rommSaveBackupCount,
+            System.currentTimeMillis(),
+            saveMode(tag, emulator),
+        )
+    }
 
     fun listBackupGames(): List<SaveBackupGame> = backupManager.listGames()
     fun listBackups(tag: String, base: String): List<SaveBackup> = backupManager.list(tag, base)
     fun hasBackups(): Boolean = backupManager.listGames().isNotEmpty()
-    fun restoreBackup(tag: String, base: String, stamp: Long): Boolean =
-        backupManager.restore(tag, base, stamp, settings.rommSaveBackupCount)
+    fun restoreBackup(
+        tag: String,
+        base: String,
+        stamp: Long,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ): Boolean =
+        backupManager.restore(tag, base, stamp, settings.rommSaveBackupCount, mode)
 
     // Restore a backup locally and make it the server head. A restore is an explicit "this is my
     // save" intent, so it wins on the server too (append-only history keeps the superseded save).
@@ -297,13 +1026,37 @@ class SaveSyncService(
         stamp: Long,
         resolveGame: (String) -> Triple<String, String, String?>?,
     ): RestoreOutcome = withContext(Dispatchers.IO) {
-        if (!restoreBackup(tag, base, stamp)) return@withContext RestoreOutcome.Failed
-        val gameKey = findGameKey(tag, base, resolveGame) ?: return@withContext RestoreOutcome.RestoredLocalOnly
+        val gameKey = findGameKey(tag, base, resolveGame)
+        if (gameKey == null) {
+            return@withContext if (restoreBackup(tag, base, stamp)) {
+                RestoreOutcome.RestoredLocalOnly
+            } else {
+                RestoreOutcome.Failed
+            }
+        }
+        val emulator = resolveGame(gameKey)?.third
+        val kind = standaloneKind(tag, emulator)
+        if (kind != null && standalone?.isLinked(kind) != true) return@withContext RestoreOutcome.Failed
+        if (kind != null) resolveLocal(tag, base, gameKey, emulator)
+        val mode = saveMode(tag, emulator)
+        if (!restoreBackup(tag, base, stamp, mode)) return@withContext RestoreOutcome.Failed
+        if (kind != null) {
+            val archive = resolver.resolve(tag, base, mode)?.files?.singleOrNull()
+                ?: return@withContext RestoreOutcome.Failed
+            runCatching { standalone?.applyMirror(kind, gameKey, archive) }
+                .getOrElse { return@withContext RestoreOutcome.Failed }
+        } else if (melonDs?.supports(tag, emulator, gameKey) == true) {
+            runCatching { melonDs.apply(tag, base, gameKey) }
+                .getOrElse { return@withContext RestoreOutcome.Failed }
+        } else if (retroArch?.supports(gameKey) == true) {
+            runCatching { retroArch.applySaves(tag, base, gameKey) }
+                .getOrElse { return@withContext RestoreOutcome.Failed }
+        }
         val romId = isSyncableGame(gameKey) ?: return@withContext RestoreOutcome.RestoredLocalOnly
         val deviceId = registrar.deviceId() ?: return@withContext RestoreOutcome.RestoredLocalOnly
-        val emulator = resolveGame(gameKey)?.third
         val slot = store.activeSlot(gameKey)
-        val local = resolver.resolve(tag, base) ?: return@withContext RestoreOutcome.RestoredLocalOnly
+        val local = resolveLocal(tag, base, gameKey, emulator, refresh = false)
+            ?: return@withContext RestoreOutcome.RestoredLocalOnly
         val baseHead = store.get(gameKey, slot)?.lastUploadedHash
         when (applyPromotion(tag, base, gameKey, slot, romId, emulator, local.contentHash, baseHead, deviceId)) {
             PromoteResult.PROMOTED -> { promotions.delete(gameKey, slot); RestoreOutcome.Promoted }
@@ -332,7 +1085,7 @@ class SaveSyncService(
         deviceId: String,
     ): PromoteResult {
         val head = try {
-            headSaveFor(client.getSaves(romId, deviceId), slot)
+            headSaveFor(client.getSaves(romId, deviceId), slot, saveMode(tag, emulator))
         } catch (t: Throwable) {
             return PromoteResult.UNREACHABLE
         }
@@ -393,9 +1146,15 @@ class SaveSyncService(
     private fun verifyDownloaded(tmp: File, expectedHash: String?) {
         if (tmp.length() == 0L) throw IllegalStateException("empty download")
         if (expectedHash != null && expectedHash.length == 32) {
-            val actual = SaveHasher.hashFile(tmp)
-            if (!actual.equals(expectedHash, ignoreCase = true)) {
-                throw IllegalStateException("hash mismatch (expected $expectedHash, got $actual)")
+            val rawHash = SaveHasher.hashFile(tmp)
+            if (!rawHash.equals(expectedHash, ignoreCase = true)) {
+                val bundleHash = SaveHasher.hashZipBundle(tmp)
+                if (!bundleHash.equals(expectedHash, ignoreCase = true)) {
+                    throw IllegalStateException(
+                        "hash mismatch (expected $expectedHash, got $rawHash" +
+                            if (bundleHash != null) ", bundle $bundleHash)" else ")",
+                    )
+                }
             }
         }
     }
@@ -410,18 +1169,56 @@ class SaveSyncService(
         deviceId: String,
         overwrite: Boolean,
     ) {
-        val local = resolver.resolve(tag, base) ?: return
+        val statePayload = libretroStates?.isStateSlot(slot) == true
+        if (statePayload && !supportsSaveStateSync(gameKey)) return
+        val local = resolveSlotLocal(tag, base, gameKey, slot, emulator) ?: return
         statusHolder.setActive(SaveSyncStatus.UPLOADING)
         val cacheDir = paths.configCache.apply { mkdirs() }
-        val file = if (local.isBundle) {
-            resolver.bundleToZip(tag, base, File.createTempFile("romm-up", ".zip", cacheDir))
+        val mode = saveMode(tag, emulator)
+        val needsTemp = local.isBundle || mode != LocalSaveMode.NORMAL || statePayload
+        val file = if (needsTemp) {
+            val namedDir = File(cacheDir, "save-upload-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+            val named = File(namedDir, local.uploadFileName)
+            if (statePayload) {
+                local.files.single().copyTo(named, overwrite = true)
+                named
+            } else {
+                resolver.bundleToZip(tag, base, named, mode)
+            }
         } else {
             local.files.single()
+        }
+        if (statePayload) {
+            val saved = try {
+                val existing = client.getStates(romId)
+                    .firstOrNull { it.fileName == local.uploadFileName }
+                if (existing == null) {
+                    client.uploadState(romId, emulator, file)
+                } else {
+                    client.updateState(existing.id, file)
+                }
+            } finally {
+                if (needsTemp) file.parentFile?.deleteRecursively()
+            }
+            store.upsert(
+                SaveSyncRow(
+                    gameKey = gameKey,
+                    slot = slot,
+                    rommRomId = romId,
+                    rommSaveId = saved.id,
+                    lastSyncedAt = saved.updatedAt,
+                    lastUploadedHash = local.contentHash,
+                    localContentHash = local.contentHash,
+                    serverUpdatedAt = saved.updatedAt,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+            return
         }
         val saved = try {
             client.uploadSave(romId, emulator, slot, deviceId, overwrite, file)
         } finally {
-            if (local.isBundle) file.delete()
+            if (needsTemp) file.parentFile?.deleteRecursively()
         }
         store.upsert(
             SaveSyncRow(
@@ -440,12 +1237,40 @@ class SaveSyncService(
 
     data class SyncSummary(val uploaded: Int, val downloaded: Int, val conflicts: Int)
 
-    fun pendingConflictCount(): Int = pendingConflicts.count()
+    fun pendingConflictCount(): Int = pendingConflicts.all().count {
+        libretroStates?.isStateSlot(it.slot) != true || supportsSaveStateSync(it.gameKey)
+    }
 
-    fun localSaveModifiedMillis(tag: String, base: String): Long? = resolver.resolve(tag, base)?.modifiedMillis
+    fun localSaveModifiedMillis(
+        tag: String,
+        base: String,
+        gameKey: String,
+        slot: String,
+        emulator: String?,
+    ): Long? = resolveSlotLocal(tag, base, gameKey, slot, emulator)?.modifiedMillis
 
-    fun clearResolvedConflict(gameKey: String, displayName: String, keepLocal: Boolean) {
-        pendingConflicts.delete(gameKey)
+    internal fun localSave(
+        tag: String,
+        base: String,
+        gameKey: String,
+        emulator: String?,
+    ): LocalSave? = resolveLocal(tag, base, gameKey, emulator)
+
+    internal fun applySlotDownload(
+        tag: String,
+        base: String,
+        gameKey: String,
+        emulator: String?,
+        downloaded: File,
+    ): String? {
+        val slot = store.activeSlot(gameKey)
+        backupBeforeDownload(tag, base, gameKey, slot, emulator)
+        applyDownloaded(tag, base, gameKey, slot, emulator, downloaded)
+        return resolveLocal(tag, base, gameKey, emulator, refresh = false)?.contentHash
+    }
+
+    fun clearResolvedConflict(gameKey: String, slot: String, displayName: String, keepLocal: Boolean) {
+        pendingConflicts.delete(gameKey, slot)
         history.add(entry(gameKey, displayName, if (keepLocal) SyncDirection.UPLOAD else SyncDirection.DOWNLOAD))
     }
 
@@ -494,7 +1319,7 @@ class SaveSyncService(
     ): SyncSummary = withContext(Dispatchers.IO) {
         val deviceId = registrar.deviceId()
         if (deviceId == null) {
-            statusHolder.settle(enabled = syncEnabled(), online = true, pendingConflicts = pendingConflicts.count(), hadError = false)
+            statusHolder.settle(enabled = syncEnabled(), online = true, pendingConflicts = pendingConflictCount(), hadError = false)
             return@withContext SyncSummary(0, 0, 0)
         }
         matcher.refresh()
@@ -505,18 +1330,50 @@ class SaveSyncService(
         val scanned = ArrayList<Scanned>()
         for (gameKey in gameKeys) {
             val (tag, base, emulator) = resolveGame(gameKey) ?: continue
+            val kind = standaloneKind(tag, emulator)
+            if ((tag.equals("3DS", true) || tag.equals("WIIU", true)) && kind == null) {
+                dev.cannoli.scorza.util.RommLog.write(
+                    "standalone save bridge not selected [$base]: tag=$tag emulator=${emulator ?: "none"}",
+                )
+            }
+            if (kind != null && standalone?.isLinked(kind) != true) continue
+            if (kind != null && standalone?.isGameActive() == true) continue
+            val activeRetroArch = retroArch?.takeIf { it.isGameActive() }
+            if (
+                kind == null &&
+                activeRetroArch != null &&
+                (
+                    activeRetroArch.supports(gameKey) ||
+                        saveMode(tag, emulator) == LocalSaveMode.PPSSPP_DIRECTORY_ARCHIVE
+                )
+            ) {
+                continue
+            }
             val romId = isSyncableGame(gameKey) ?: continue
             val slot = store.activeSlot(gameKey)
-            scanned.add(Scanned(tag, base, gameKey, slot, emulator, romId, resolver.resolve(tag, base), store.get(gameKey, slot)))
+            scanned.add(
+                Scanned(
+                    tag,
+                    base,
+                    gameKey,
+                    slot,
+                    emulator,
+                    romId,
+                    resolveLocal(tag, base, gameKey, emulator),
+                    store.get(gameKey, slot),
+                ),
+            )
         }
 
-        // Phase 1b: one batch negotiate for every game that has a local save.
+        // Phase 1b: one batch negotiate for the whole local library. RomM returns downloads for
+        // server saves omitted from the payload, so an empty local-save list is still meaningful.
         val withLocal = scanned.filter { it.local != null }
         val opByKey = HashMap<Pair<Int, String>, SyncOperationDto>()
+        var batchSessionId: Int? = null
         var batchReached = false
         var batchFailed = false
-        if (withLocal.isNotEmpty()) {
-            dev.cannoli.scorza.util.RommLog.write("=== sweep: negotiating ${withLocal.size} saves with RomM ===")
+        if (scanned.isNotEmpty()) {
+            dev.cannoli.scorza.util.RommLog.write("=== sweep: negotiating ${withLocal.size} local saves across ${scanned.size} games with RomM ===")
             val payload = SyncNegotiatePayload(
                 deviceId = deviceId,
                 saves = withLocal.map { s ->
@@ -525,7 +1382,7 @@ class SaveSyncService(
                         fileName = s.local!!.uploadFileName,
                         slot = s.slot,
                         emulator = s.emulator,
-                        contentHash = s.anchor?.lastUploadedHash,
+                        contentHash = s.local.contentHash,
                         updatedAt = isoOf(s.local.modifiedMillis),
                         fileSizeBytes = s.local.sizeBytes,
                     )
@@ -541,13 +1398,11 @@ class SaveSyncService(
             }
             if (response != null) {
                 batchReached = true
+                batchSessionId = response.sessionId
                 response.operations.forEach { opByKey[it.romId to (it.slot ?: DEFAULT_SLOT)] = it }
-                runCatching {
-                    val completed = response.operations.count { it.action == "download" || it.action == "upload" }
-                    client.completeSyncSession(response.sessionId, SyncCompletePayload(operationsCompleted = completed, operationsFailed = 0))
-                }
             } else {
                 batchFailed = true
+                dev.cannoli.scorza.util.RommLog.write("sweep negotiate failed")
             }
         }
 
@@ -561,7 +1416,7 @@ class SaveSyncService(
             }
         }
         val reached = batchReached || getSavesReached
-        val serverContacted = withLocal.isNotEmpty() || getSavesAttempted
+        val serverContacted = scanned.isNotEmpty() || getSavesAttempted
         val attempted = scanned.count { it.local != null || it.anchor != null }
 
         // Phase 2: report the plan, sorted by platform then game name.
@@ -574,6 +1429,7 @@ class SaveSyncService(
         // Phase 3: apply the actionable plans.
         dev.cannoli.scorza.util.RommLog.write("=== sweep: applying ===")
         var up = 0; var down = 0; var conflicts = 0; var error = false
+        var completedOperations = 0; var failedOperations = 0
         val failures = ArrayList<SyncFailure>()
         for (p in sorted) {
             if (p.action == SweepAction.UP_TO_DATE || p.action == SweepAction.NO_SAVE || p.action == SweepAction.UNREACHABLE) continue
@@ -586,6 +1442,9 @@ class SaveSyncService(
                 else -> {}
             }
             if (!r.ok) { error = true; failures.add(SyncFailure(p.name, r.label)) }
+            if (r.direction == SyncDirection.UPLOAD || r.direction == SyncDirection.DOWNLOAD) {
+                if (r.ok) completedOperations++ else failedOperations++
+            }
             // escalate() records conflicts itself (deduped); log only real transfers and errors here.
             when {
                 !r.ok -> history.add(entry(p.gameKey, p.name, SyncDirection.ERROR, r.label))
@@ -594,8 +1453,21 @@ class SaveSyncService(
                 else -> {}
             }
         }
+        batchSessionId?.let { sessionId ->
+            runCatching {
+                client.completeSyncSession(
+                    sessionId,
+                    SyncCompletePayload(
+                        operationsCompleted = completedOperations,
+                        operationsFailed = failedOperations,
+                    ),
+                )
+            }.onFailure {
+                dev.cannoli.scorza.util.RommLog.write("sweep session completion failed: ${errLabel(it)}")
+            }
+        }
 
-        val pending = pendingConflicts.count()
+        val pending = pendingConflictCount()
         // Reachability reflects whether RomM actually answered, not whether Android
         // validated internet: a LAN-only server on an unvalidated network still syncs.
         val reachable = reached || !serverContacted
@@ -608,7 +1480,8 @@ class SaveSyncService(
         SyncSummary(up, down, conflicts)
     }
 
-    private fun planFor(s: Scanned, op: SyncOperationDto?, batchFailed: Boolean, deviceId: String, onReach: (Boolean) -> Unit): SweepPlan {
+    private fun planFor(s: Scanned, rawOp: SyncOperationDto?, batchFailed: Boolean, deviceId: String, onReach: (Boolean) -> Unit): SweepPlan {
+        val op = rawOp?.takeIf { isCompatibleSaveFile(it.fileName, saveMode(s.tag, s.emulator)) }
         val dbg = "local=${s.local?.contentHash?.take(8)} anchorUp=${s.anchor?.lastUploadedHash?.take(8)} " +
             "anchorLocal=${s.anchor?.localContentHash?.take(8)} server=${op?.serverContentHash?.take(8)}" +
             (op?.reason?.ifEmpty { null }?.let { " reason=$it" } ?: "")
@@ -616,20 +1489,28 @@ class SaveSyncService(
             SweepPlan(s.tag, s.base, s.gameKey, s.slot, s.emulator, s.romId, action, downloadOp, conflict, dbg, promotion)
         val local = s.local
         if (local == null) {
-            // No local save: pull the server copy if one exists, even with no prior anchor
-            // (first-time restore / restore after a local delete).
+            if (batchFailed) return plan(SweepAction.UNREACHABLE)
+            if (op?.action == "download") {
+                val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
+                return plan(action, downloadOp = op)
+            }
+            // The batch did not name a download. A missing local file still pulls the server
+            // head, including a first sync that has never written an anchor. headSaveFor picks
+            // the newest row rather than whichever save RomM listed first.
             val serverSaves = try {
                 client.getSaves(s.romId, deviceId).also { onReach(true) }
             } catch (t: Throwable) {
                 onReach(false)
                 return plan(SweepAction.UNREACHABLE)
             }
-            val save = headSaveFor(serverSaves, s.slot) ?: return plan(SweepAction.NO_SAVE)
+            val save = headSaveFor(serverSaves, s.slot, saveMode(s.tag, s.emulator))
+                ?: return plan(SweepAction.NO_SAVE)
             val action = if (s.anchor == null) SweepAction.DOWNLOAD else SweepAction.REGENERATE
             return plan(action, downloadOp = downloadOpFor(save, s.romId, s.slot))
         }
         promotions.get(s.gameKey, s.slot)?.let { return plan(SweepAction.PROMOTE, promotion = it) }
         if (batchFailed) return plan(SweepAction.UNREACHABLE)
+        if (isAnchoredNoOp(op, s.anchor, local)) return plan(SweepAction.UP_TO_DATE)
         return when (op?.action) {
             "download" -> plan(SweepAction.DOWNLOAD, downloadOp = op)
             "upload" -> if (isStuckUpload(op, s.anchor, local)) {
@@ -667,7 +1548,11 @@ class SaveSyncService(
         plan: (SweepAction, SyncOperationDto?, PreLaunchOutcome.Conflict?, RestorePromotion?) -> SweepPlan,
     ): SweepPlan {
         val head = try {
-            headSaveFor(client.getSaves(s.romId, deviceId), s.slot).also { onReach(true) }
+            headSaveFor(
+                client.getSaves(s.romId, deviceId),
+                s.slot,
+                saveMode(s.tag, s.emulator),
+            ).also { onReach(true) }
         } catch (t: Throwable) {
             onReach(false)
             return plan(SweepAction.UNREACHABLE, null, null, null)
@@ -704,7 +1589,16 @@ class SaveSyncService(
         }
         SweepAction.DOWNLOAD, SweepAction.REGENERATE -> {
             statusHolder.setActive(SaveSyncStatus.DOWNLOADING)
-            val outcome = downloadOp(p.tag, p.name, p.gameKey, p.slot, p.romId, deviceId, p.downloadOp!!)
+            val outcome = downloadOp(
+                p.tag,
+                p.name,
+                p.gameKey,
+                p.slot,
+                p.romId,
+                p.emulator,
+                deviceId,
+                p.downloadOp!!,
+            )
             if (outcome == PreLaunchOutcome.Proceed) {
                 ExecResult(SyncDirection.DOWNLOAD, true, if (p.action == SweepAction.REGENERATE) "regenerated" else "downloaded")
             } else {
@@ -715,7 +1609,7 @@ class SaveSyncService(
             statusHolder.setActive(SaveSyncStatus.UPLOADING)
             try {
                 applyConflictKeepLocal(p.conflict!!, deviceId)
-                pendingConflicts.delete(p.gameKey)
+                pendingConflicts.delete(p.gameKey, p.slot)
                 ExecResult(SyncDirection.UPLOAD, true, "kept local")
             } catch (t: Throwable) {
                 ExecResult(SyncDirection.UPLOAD, false, "keep-local failed (${errLabel(t)})", logDetailOf(t))
@@ -725,7 +1619,7 @@ class SaveSyncService(
             statusHolder.setActive(SaveSyncStatus.DOWNLOADING)
             try {
                 applyConflictUseServer(p.conflict!!, deviceId)
-                pendingConflicts.delete(p.gameKey)
+                pendingConflicts.delete(p.gameKey, p.slot)
                 ExecResult(SyncDirection.DOWNLOAD, true, "kept server")
             } catch (t: Throwable) {
                 ExecResult(SyncDirection.DOWNLOAD, false, "keep-server failed (${errLabel(t)})", logDetailOf(t))
@@ -753,9 +1647,9 @@ class SaveSyncService(
         } catch (t: Throwable) {
             return ExecResult(SyncDirection.UPLOAD, false, "upload failed (409; ${errLabel(t)})")
         }
-        val save = headSaveFor(serverSaves, p.slot)
+        val save = headSaveFor(serverSaves, p.slot, saveMode(p.tag, p.emulator))
             ?: return ExecResult(SyncDirection.UPLOAD, false, "upload failed (409)")
-        val local = resolver.resolve(p.tag, p.name)
+        val local = resolveSlotLocal(p.tag, p.name, p.gameKey, p.slot, p.emulator)
         if (local != null && save.contentHash != null && save.contentHash == local.contentHash) {
             // Server already holds an identical save; adopt it as the anchor so future sweeps are quiet.
             store.upsert(
@@ -825,13 +1719,15 @@ class SaveSyncService(
         else -> ""
     }
 
-    suspend fun resolvePending(gameKey: String, keepLocal: Boolean, resolveGame: (String) -> Triple<String, String, String?>?): Boolean = withContext(Dispatchers.IO) {
-        val pc = pendingConflicts.get(gameKey) ?: return@withContext false
+    suspend fun resolvePending(gameKey: String, slot: String, keepLocal: Boolean, resolveGame: (String) -> Triple<String, String, String?>?): Boolean = withContext(Dispatchers.IO) {
+        if (libretroStates?.isStateSlot(slot) == true && !supportsSaveStateSync(gameKey)) {
+            return@withContext false
+        }
+        val pc = pendingConflicts.get(gameKey, slot) ?: return@withContext false
         val deviceId = registrar.deviceId() ?: return@withContext false
         val (tag, base, emulator) = resolveGame(gameKey) ?: return@withContext false
-        val slot = store.activeSlot(gameKey)
         val c = PreLaunchOutcome.Conflict(
-            gameKey, slot, null, pc.serverUpdatedAt, null, pc.serverSaveId ?: 0, pc.romId, tag, base, emulator,
+            gameKey, pc.slot, null, pc.serverUpdatedAt, null, pc.serverSaveId ?: 0, pc.romId, tag, base, emulator,
             serverContentHash = pc.serverContentHash,
         )
         try {
@@ -842,27 +1738,31 @@ class SaveSyncService(
                 applyConflictUseServer(c, deviceId)
                 history.add(entry(gameKey, pc.displayName, SyncDirection.DOWNLOAD))
             }
-            pendingConflicts.delete(gameKey)
+            pendingConflicts.delete(gameKey, pc.slot)
             true
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { false }
     }
 
-    fun skipPending(gameKey: String) {
-        val pc = pendingConflicts.get(gameKey) ?: return
-        pendingConflicts.markDismissed(gameKey, pc.serverContentHash)
+    fun skipPending(gameKey: String, slot: String) {
+        val pc = pendingConflicts.get(gameKey, slot) ?: return
+        pendingConflicts.markDismissed(gameKey, slot, pc.serverContentHash)
     }
 
     private fun entry(gameKey: String, name: String, dir: SyncDirection, detail: String? = null) =
         SyncHistoryEntry(gameKey, name, dir, detail, System.currentTimeMillis())
 
     private fun escalate(gameKey: String, name: String, c: PreLaunchOutcome.Conflict) {
-        val existing = pendingConflicts.get(gameKey)
+        if (libretroStates?.isStateSlot(c.slot) == true &&
+            !supportsSaveStateSync(gameKey)
+        ) return
+        val existing = pendingConflicts.get(gameKey, c.slot)
         // Already recorded this exact conflict (pending or dismissed) -> don't re-log it every sweep.
         if (existing != null && existing.serverContentHash == c.serverContentHash) return
+        val displayName = if (libretroStates?.isStateSlot(c.slot) == true) "$name$SAVE_STATE_HISTORY_SUFFIX" else name
         pendingConflicts.upsert(
-            PendingConflict(gameKey, c.romId, name, c.saveId, c.serverContentHash, c.serverTime, System.currentTimeMillis(), null)
+            PendingConflict(gameKey, c.slot, c.romId, displayName, c.saveId, c.serverContentHash, c.serverTime, System.currentTimeMillis(), null)
         )
-        history.add(entry(gameKey, name, SyncDirection.CONFLICT, c.reason))
+        history.add(entry(gameKey, displayName, SyncDirection.CONFLICT, c.reason))
     }
 
     private fun isoOf(millis: Long): String = Instant.ofEpochMilli(millis).toString()

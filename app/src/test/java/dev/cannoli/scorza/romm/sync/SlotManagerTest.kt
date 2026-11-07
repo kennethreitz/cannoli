@@ -78,4 +78,19 @@ class SlotManagerTest {
         verify { client.deleteSaves(listOf(9)) }
         assertEquals("new", store.activeSlot("SNES/Mario.sfc"))
     }
+
+    @Test fun managed_save_state_slots_are_hidden_and_reserved() = runTest {
+        val managed = "${LibretroStateBridge.STATE_SLOT_PREFIX}abc123"
+        store.upsert(SaveSyncRow("SNES/Mario.sfc", managed, 42, 8, "t", "h", "h", "t", 1L))
+        every { client.getSaves(42, "dev-1") } returns listOf(
+            RommSaveDto(id = 8, slot = managed, updatedAt = "t"),
+        )
+
+        assertEquals(listOf(DEFAULT_SLOT), slotManager.listSlots("SNES/Mario.sfc", 42).map { it.slot })
+        try {
+            slotManager.create("SNES/Mario.sfc", "SNES", "Mario", 42, "snes9x", managed)
+            throw AssertionError("expected IllegalArgumentException")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
 }

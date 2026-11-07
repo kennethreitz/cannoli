@@ -12,11 +12,17 @@ class SaveBackupManager(
     private fun rootDir() = File(cannoliRoot, "Backup/SaveSync")
     private fun gameDir(tag: String, base: String) = File(rootDir(), "$tag/$base")
 
-    fun backup(tag: String, base: String, keepCount: Int, stamp: Long) {
+    fun backup(
+        tag: String,
+        base: String,
+        keepCount: Int,
+        stamp: Long,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ) {
         if (keepCount <= 0) return
-        if (resolver.resolve(tag, base) == null) return
+        if (resolver.resolve(tag, base, mode) == null) return
         val dir = gameDir(tag, base).apply { mkdirs() }
-        resolver.bundleToZip(tag, base, File(dir, "$stamp.zip"))
+        resolver.bundleToZip(tag, base, File(dir, "$stamp.zip"), mode)
         prune(dir, keepCount)
     }
 
@@ -44,14 +50,20 @@ class SaveBackupManager(
     // Restore a chosen backup over the current save. The current save is backed up first (so a
     // wrong restore is reversible), and the source zip is copied out before that backup runs in
     // case pruning would remove it.
-    fun restore(tag: String, base: String, stamp: Long, keepCount: Int): Boolean {
+    fun restore(
+        tag: String,
+        base: String,
+        stamp: Long,
+        keepCount: Int,
+        mode: LocalSaveMode = LocalSaveMode.NORMAL,
+    ): Boolean {
         val zip = File(gameDir(tag, base), "$stamp.zip")
         if (!zip.isFile) return false
         val temp = File.createTempFile("restore", ".zip", File(cannoliRoot, "Backup").apply { mkdirs() })
         return try {
             zip.copyTo(temp, overwrite = true)
-            backup(tag, base, keepCount, System.currentTimeMillis())
-            resolver.applyDownload(tag, base, temp)
+            backup(tag, base, keepCount, System.currentTimeMillis(), mode)
+            resolver.applyDownload(tag, base, temp, mode)
             true
         } finally {
             temp.delete()

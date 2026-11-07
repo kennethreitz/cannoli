@@ -27,4 +27,28 @@ class RommMenuRowTest {
         assertEquals(true, withBackups.contains(RommSaveSyncRow.RESTORE))
         assertEquals(false, noBackups.contains(RommSaveSyncRow.RESTORE))
     }
+
+    @Test fun `poll interval appears only when save sync is enabled`() {
+        val enabled = RommSaveSyncRow.visibleRows(supported = true, enabled = true)
+        val disabled = RommSaveSyncRow.visibleRows(supported = true, enabled = false)
+
+        assertEquals(true, enabled.contains(RommSaveSyncRow.INTERVAL))
+        assertEquals(false, disabled.contains(RommSaveSyncRow.INTERVAL))
+    }
+
+    @Test fun `installed standalone emulators appear as experimental save connections`() {
+        val rows = RommSaveSyncRow.visibleRows(
+            supported = true,
+            enabled = true,
+            citraAvailable = true,
+            cemuAvailable = true,
+            vita3kAvailable = true,
+            ppssppAvailable = true,
+        )
+
+        assertEquals(true, rows.contains(RommSaveSyncRow.CITRA))
+        assertEquals(true, rows.contains(RommSaveSyncRow.CEMU))
+        assertEquals(true, rows.contains(RommSaveSyncRow.VITA3K))
+        assertEquals(true, rows.contains(RommSaveSyncRow.PPSSPP))
+    }
 }
