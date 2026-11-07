@@ -18,6 +18,30 @@ fun gitCommitHash(): String = try {
 
 fun buildDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
+// Local builds derive their version from `git describe --tags` (e.g. "1.9.1-74-ge5566b53").
+// Release CI patches the literal versionName/versionCode lines in defaultConfig; when those
+// differ from the "1.0.0"/1 placeholders, the CI values win.
+data class GitVersion(val name: String, val code: Int)
+
+fun gitVersion(): GitVersion? = try {
+    val process = ProcessBuilder("git", "describe", "--tags", "--dirty", "--match", "v[0-9]*")
+        .directory(rootDir).redirectErrorStream(true).start()
+    val out = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() != 0 || out.isEmpty()) null else {
+        val name = out.removePrefix("v")
+        val m = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?""").find(name)
+        if (m == null) null else {
+            val (major, minor, patch) = m.destructured
+            val ahead = m.groupValues[4].toIntOrNull() ?: 0
+            // Same scheme as release.yml: M*1000000 + m*10000 + p*100 + 99 for a release.
+            // Commits past the tag push the code above the tagged release, capped below
+            // the next patch's release (x.y.(p+1) = ...99) so real releases still win.
+            val release = major.toInt() * 1000000 + minor.toInt() * 10000 + patch.toInt() * 100 + 99
+            GitVersion(name, if (ahead == 0) release else minOf(release + ahead, release + 99))
+        }
+    }
+} catch (_: Exception) { null }
+
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(keystorePropertiesFile.inputStream())
@@ -37,6 +61,14 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+        // Placeholders above are replaced by release CI; otherwise use git describe.
+        // (Written without spaces around '=' so release.yml's sed doesn't rewrite them.)
+        if (versionCode == 1 && versionName == "1.0.0") {
+            gitVersion()?.let {
+                versionName=it.name
+                versionCode=it.code
+            }
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
