@@ -32,6 +32,7 @@ class LaunchManagerSlotTest {
         root: File,
         launchState: LaunchState = mockk(relaxed = true),
         apkLauncher: ApkLauncher = mockk(relaxed = true),
+        gameOverrides: dev.cannoli.scorza.db.GameOverrideStore? = null,
     ): LaunchManager {
         val settings = mockk<SettingsRepository>(relaxed = true)
         every { settings.sdCardRoot } returns root.absolutePath
@@ -47,6 +48,7 @@ class LaunchManagerSlotTest {
             activeMappingHolder = mockk(relaxed = true),
             atomicRename = mockk(relaxed = true),
             activityDisplayRouter = mockk(relaxed = true),
+            gameOverrides = gameOverrides,
         )
     }
 
@@ -101,4 +103,22 @@ class LaunchManagerSlotTest {
         assertFalse(launchState.launching)
         assertFalse(launchState.gameActive.value)
     }
+    @Test fun `resume scan skips failed override and continues with other games`() {
+        val root = tmp.newFolder()
+        val overrides = mockk<dev.cannoli.scorza.db.GameOverrideStore>()
+        every { overrides.get(1L) } throws RuntimeException("no such column: source")
+        every { overrides.get(2L) } returns null
+        val mgr = manager(root, gameOverrides = overrides)
+        val broken = rom(root)
+        val healthy = broken.copy(
+            id = 2L,
+            path = File(root, "roms/snes/Healthy.sfc"),
+            launchTarget = dev.cannoli.scorza.model.LaunchTarget.Embedded("test-core.so"),
+        )
+        for (r in listOf(broken, healthy)) {
+            File(mgr.saveStateBasePath(r)).apply { parentFile!!.mkdirs(); writeText("state") }
+        }
+        assertEquals(setOf(healthy.path.absolutePath), mgr.findResumableRoms(listOf(broken, healthy)))
+    }
+
 }

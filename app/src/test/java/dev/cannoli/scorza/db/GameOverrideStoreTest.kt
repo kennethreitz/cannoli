@@ -105,4 +105,29 @@ class GameOverrideStoreTest {
         assertEquals(1, store.countForPlatform("GBA"))
     }
 
+    @Test fun `database open repairs a legacy schema even when migration version is current or newer`() {
+        for (version in listOf(Migrations.current, 99)) {
+            val name = "stranded-open-$version"
+            val original = db(name)
+            val id = insertRom(original, "NES", "NES/game.nes")
+            original.withConn { conn ->
+                // Reproduce the experimental schema, with all unrelated tables current.
+                conn.prepare("ALTER TABLE game_overrides DROP COLUMN source").use { it.step() }
+                conn.prepare("ALTER TABLE game_overrides ADD COLUMN runner TEXT").use { it.step() }
+                conn.execute(
+                    "INSERT INTO game_overrides (rom_id, core_id, runner) VALUES (?, ?, ?)",
+                    id, "nestopia_libretro", "Internal",
+                )
+                conn.prepare("PRAGMA user_version = $version").use { it.step() }
+            }
+            original.close()
+            val reopened = db(name)
+            assertEquals(
+                EmulatorChoice(EmulatorSource.Internal, "nestopia_libretro"),
+                GameOverrideStore(reopened).get(id),
+            )
+            reopened.close()
+        }
+    }
+
 }

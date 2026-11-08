@@ -253,14 +253,20 @@ class LaunchManager(
     fun findResumableRoms(roms: List<Rom>): Set<String> {
         val result = mutableSetOf<String>()
         for (rom in roms) {
-            if (!hasSaveState(rom)) continue
-            // Slots are a Cannoli and libretro concept. A standalone app manages its own saves,
-            // so offering Resume for one promises something no external emulator can honour.
-            if (sourceFor(rom) == EmulatorSource.Standalone) continue
-            val target = rom.launchTarget
-            val embedded = target is LaunchTarget.Embedded || getEmbeddedCorePath(rom) != null
-            if (embedded || (target is LaunchTarget.RetroArch && RetroArchLauncher.isRicotta(settings.retroArchPackage))) {
-                result.add(rom.path.absolutePath)
+            try {
+                if (!hasSaveState(rom)) continue
+                // Slots are a Cannoli and libretro concept. A standalone app manages its own saves,
+                // so offering Resume for one promises something no external emulator can honour.
+                if (sourceFor(rom) == EmulatorSource.Standalone) continue
+                val target = rom.launchTarget
+                val embedded = target is LaunchTarget.Embedded || getEmbeddedCorePath(rom) != null
+                if (embedded || (target is LaunchTarget.RetroArch && RetroArchLauncher.isRicotta(settings.retroArchPackage))) {
+                    result.add(rom.path.absolutePath)
+                }
+            } catch (e: Exception) {
+                // Resume badges are optional. A broken override or unreadable save must
+                // not take down Recently Played, nor imply a different launch mapping.
+                LaunchLog.error("Resume scan skipped rom_id=${rom.id}", e)
             }
         }
         return result

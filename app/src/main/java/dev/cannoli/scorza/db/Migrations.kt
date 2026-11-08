@@ -281,6 +281,39 @@ internal object Migrations {
         },
     )
 
+    /**
+     * Experimental builds used the same user_version values for different migrations.
+     * In particular, v12 once only migrated pending_conflicts; those installs can be
+     * stamped v13 but still have the runner-based override schema. Check the actual
+     * schema on every open, independently of the migration version, without dropping
+     * rows or resetting the version (which could rerun unrelated migrations).
+     */
+    fun repairGameOverrideSource(db: SQLiteConnection): Boolean {
+        val columns = db.queryAll("PRAGMA table_info(game_overrides)") { it.getText(1) }
+        if ("source" in columns) return false
+        check("rom_id" in columns) { "game_overrides table is missing" }
+        val runner = if ("runner" in columns) "runner" else "NULL"
+        db.execSQL("BEGIN IMMEDIATE")
+        try {
+            db.execSQL("ALTER TABLE game_overrides ADD COLUMN source TEXT NOT NULL DEFAULT 'RetroArch'")
+            // Match migration 12's caption conversion, leaving all legacy columns intact.
+            db.execSQL("""
+                UPDATE game_overrides SET source = CASE
+                    WHEN $runner = 'Internal' THEN 'Internal'
+                    WHEN $runner IN ('Standalone', 'App') THEN 'Standalone'
+                    WHEN $runner IS NOT NULL AND $runner <> '' THEN 'RetroArch'
+                    WHEN app_package IS NOT NULL THEN 'Standalone'
+                    ELSE 'RetroArch'
+                END
+            """.trimIndent())
+            db.execSQL("COMMIT")
+        } catch (t: Throwable) {
+            db.execSQL("ROLLBACK")
+            throw t
+        }
+        return true
+    }
+
     val current: Int = all.maxOf { it.version }
 
     fun applyFrom(conn: SQLiteConnection, oldVersion: Int) {

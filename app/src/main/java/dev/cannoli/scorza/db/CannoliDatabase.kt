@@ -21,6 +21,9 @@ class CannoliDatabase(private val pathsProvider: CannoliPathsProvider) {
         c.execSQL("PRAGMA foreign_keys = ON")
         c.execSQL("PRAGMA journal_mode = WAL")
         runMigrations(c)
+        if (Migrations.repairGameOverrideSource(c)) {
+            ScanLog.write("repaired missing game_overrides.source column")
+        }
         runIntegrityCheck(c)
         c.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
         c
