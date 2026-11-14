@@ -53,7 +53,7 @@ class RomDirectoryWalker(
         return WalkResult(tagDir = tagDir, roms = out, rekeys = rekeys)
     }
 
-    fun romRootAvailable(): Boolean = romDirectory.isDirectory
+    fun romRootAvailable(): Boolean = StorageReach.isReachable(romDirectory)
 
     fun resolveTagDir(tag: String): File? {
         val direct = File(romDirectory, tag)

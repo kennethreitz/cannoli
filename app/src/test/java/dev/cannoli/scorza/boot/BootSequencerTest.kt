@@ -192,4 +192,101 @@ class BootSequencerTest {
         assertEquals(BootState.Ready, s.state.value)
         assertEquals(1, runs.get())
     }
+
+    private val usbRoms = BootState.FolderMissing(FolderKind.ROMS, "/storage/USB/Roms")
+
+    private fun folderSequencer(
+        scope: TestScope,
+        missing: () -> BootState.FolderMissing?,
+        nowMs: () -> Long,
+        watcher: MountWatcher,
+        runs: AtomicInteger,
+        storageDependent: AtomicInteger = AtomicInteger(0),
+    ) = BootSequencer(
+        permissionStatus = FakePerms(),
+        isSetupResolved = { true },
+        detectVolumes = { emptyList() },
+        onSetupResolved = { _ -> },
+        startStorageDependent = { storageDependent.incrementAndGet() },
+        initRunner = BootSequencer.InitRunner { runs.incrementAndGet(); BootResult.Success },
+        scope = scope,
+        now = nowMs,
+        mountWatcher = watcher,
+        missingFolder = missing,
+    )
+
+    @Test fun missing_rom_folder_waits_on_the_splash_before_warning() = runTest {
+        var nowMs = 0L
+        val runs = AtomicInteger(0)
+        val storageDependent = AtomicInteger(0)
+        val s = folderSequencer(this, { usbRoms }, { nowMs }, FakeMountWatcher(), runs, storageDependent)
+        s.advance()
+        assertEquals(BootState.Resolving, s.state.value)
+        nowMs = BootSequencer.MOUNT_WAIT_TIMEOUT_MS + 1
+        s.advance()
+        assertEquals(usbRoms, s.state.value)
+        assertEquals(1, storageDependent.get())
+        assertEquals(0, runs.get())
+    }
+
+    @Test fun missing_cannoli_folder_warns_without_touching_storage() = runTest {
+        var nowMs = 0L
+        val runs = AtomicInteger(0)
+        val storageDependent = AtomicInteger(0)
+        val cannoli = BootState.FolderMissing(FolderKind.CANNOLI, "/storage/USB/Cannoli/")
+        val s = folderSequencer(this, { cannoli }, { nowMs }, FakeMountWatcher(), runs, storageDependent)
+        s.advance()
+        nowMs = BootSequencer.MOUNT_WAIT_TIMEOUT_MS + 1
+        s.advance()
+        assertEquals(cannoli, s.state.value)
+        assertEquals(0, storageDependent.get())
+        assertEquals(0, runs.get())
+    }
+
+    @Test fun a_folder_that_mounts_during_the_wait_never_shows_the_warning() = runTest {
+        var missing: BootState.FolderMissing? = usbRoms
+        val watcher = FakeMountWatcher()
+        val runs = AtomicInteger(0)
+        val s = folderSequencer(this, { missing }, { 0L }, watcher, runs)
+        s.advance()
+        assertEquals(BootState.Resolving, s.state.value)
+        missing = null
+        watcher.onChange?.invoke()
+        advanceUntilIdle()
+        assertEquals(BootState.Ready, s.state.value)
+        assertEquals(1, runs.get())
+    }
+
+    @Test fun a_late_mount_clears_the_warning() = runTest {
+        var missing: BootState.FolderMissing? = usbRoms
+        var nowMs = 0L
+        val watcher = FakeMountWatcher()
+        val runs = AtomicInteger(0)
+        val s = folderSequencer(this, { missing }, { nowMs }, watcher, runs)
+        s.advance()
+        nowMs = BootSequencer.MOUNT_WAIT_TIMEOUT_MS + 1
+        s.advance()
+        assertTrue(s.state.value is BootState.FolderMissing)
+        missing = null
+        watcher.onChange?.invoke()
+        advanceUntilIdle()
+        assertEquals(BootState.Ready, s.state.value)
+        assertEquals(1, runs.get())
+        assertTrue(watcher.stopped)
+    }
+
+    @Test fun nothing_but_the_folder_returning_gets_past_the_warning() = runTest {
+        var nowMs = 0L
+        val watcher = FakeMountWatcher()
+        val runs = AtomicInteger(0)
+        val s = folderSequencer(this, { usbRoms }, { nowMs }, watcher, runs)
+        s.advance()
+        nowMs = BootSequencer.MOUNT_WAIT_TIMEOUT_MS + 1
+        s.advance()
+        watcher.onChange?.invoke()
+        s.advance()
+        advanceUntilIdle()
+        assertTrue(s.state.value is BootState.FolderMissing)
+        assertEquals(0, runs.get())
+    }
 }

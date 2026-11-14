@@ -31,6 +31,7 @@ class BootSequencer(
     private val mountWatcher: MountWatcher = MountWatcher.None,
     private val scheduleTimeout: (delayMs: Long, action: () -> Unit) -> Unit = { _, _ -> },
     private val preparingLabel: String = "Preparing",
+    private val missingFolder: () -> BootState.FolderMissing? = { null },
 ) {
     fun interface InitRunner {
         suspend fun run(onPhase: (BootPhase, Float, String) -> Unit): BootResult
@@ -54,9 +55,10 @@ class BootSequencer(
         val setupResolved = isSetupResolved()
         val volumes = detectVolumes()
 
-        val unresolvedWithStorage = hasStorage && !setupResolved
+        val missing = if (hasStorage && setupResolved) missingFolder() else null
+        val waiting = (hasStorage && !setupResolved) || missing != null
         val awaitingMount: Boolean
-        if (unresolvedWithStorage) {
+        if (waiting) {
             if (!hasFirstUnresolved) {
                 hasFirstUnresolved = true
                 firstUnresolvedAt = now()
@@ -86,20 +88,30 @@ class BootSequencer(
             volumes = volumes,
             awaitingMount = awaitingMount,
             preparingLabel = preparingLabel,
+            missingFolder = missing,
         )
         when (after) {
             is BootState.NeedsPermission, is BootState.NeedsSetup, is BootState.Error, BootState.Ready, BootState.Resolving -> {
                 _state.value = after
             }
+            is BootState.FolderMissing -> {
+                if (after.kind == FolderKind.ROMS) ensureStorageDependent()
+                _state.value = after
+            }
             is BootState.Initializing -> {
-                if (!storageDependentStarted) {
-                    storageDependentStarted = true
-                    startStorageDependent()
-                }
+                ensureStorageDependent()
                 startInitialization()
             }
         }
     }
+
+    private fun ensureStorageDependent() {
+        if (!storageDependentStarted) {
+            storageDependentStarted = true
+            startStorageDependent()
+        }
+    }
+
 
     private fun stopMountWatch() {
         if (mountWatcherStarted) {
@@ -149,6 +161,7 @@ class BootSequencer(
             volumes: List<Pair<String, String>>,
             awaitingMount: Boolean = false,
             preparingLabel: String = "Preparing",
+            missingFolder: BootState.FolderMissing? = null,
         ): BootState {
             if (!hasStorage) {
                 return BootState.NeedsPermission(storageGranted = false)
@@ -158,8 +171,9 @@ class BootSequencer(
                 is BootState.Error -> current
                 BootState.Ready -> BootState.Ready
                 else -> when {
-                    setupResolved -> BootState.Initializing(BootPhase.IMPORT, 0f, preparingLabel)
+                    setupResolved && missingFolder == null -> BootState.Initializing(BootPhase.IMPORT, 0f, preparingLabel)
                     awaitingMount -> BootState.Resolving
+                    missingFolder != null -> missingFolder
                     else -> BootState.NeedsSetup(volumes)
                 }
             }

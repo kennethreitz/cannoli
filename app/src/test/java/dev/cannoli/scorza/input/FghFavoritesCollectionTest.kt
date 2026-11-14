@@ -62,6 +62,7 @@ class FghFavoritesCollectionTest {
             settingsViewModel = mockk(relaxed = true),
             saveSyncService = mockk(relaxed = true),
             pathsProvider = mockk(relaxed = true),
+            osdController = mockk(relaxed = true),
         )
     }
 

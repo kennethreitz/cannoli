@@ -54,6 +54,11 @@ class DirectoryBrowserInputHandler @Inject constructor(
                     nav.pop()
                     launcherActions.confirmRomDirectoryChange(resolved)
                 }
+                BrowsePurpose.BOOT_ROM_DIRECTORY -> {
+                    nav.pop()
+                    val warning = nav.currentScreen as? LauncherScreen.FolderMissing
+                    if (warning != null) nav.replaceTop(warning.copy(pendingRomFolder = resolved))
+                }
             }
         } else {
             val entryIdx = screen.selectedIndex - if (hasSelect) 1 else 0

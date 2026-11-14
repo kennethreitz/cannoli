@@ -18,6 +18,7 @@ import dev.cannoli.scorza.input.screen.ScrollListInputHandler
 import dev.cannoli.scorza.input.screen.SettingsInputHandler
 import dev.cannoli.scorza.input.screen.OnboardingPermissionsInputHandler
 import dev.cannoli.scorza.input.screen.OnboardingStorageInputHandler
+import dev.cannoli.scorza.input.screen.FolderMissingInputHandler
 import dev.cannoli.scorza.input.screen.PermissionsInputHandler
 import dev.cannoli.scorza.input.screen.SaveSlotsInputHandler
 import dev.cannoli.scorza.input.screen.SaveStatePickerInputHandler
@@ -49,6 +50,7 @@ class InputRouter @Inject constructor(
     val settingsHandler: SettingsInputHandler,
     val onboardingPermissionsHandler: OnboardingPermissionsInputHandler,
     val onboardingStorageHandler: OnboardingStorageInputHandler,
+    val folderMissingHandler: FolderMissingInputHandler,
     val directoryBrowserHandler: DirectoryBrowserInputHandler,
     val inputTesterHandler: InputTesterInputHandler,
     val saveStatePickerHandler: SaveStatePickerInputHandler,
@@ -114,6 +116,7 @@ class InputRouter @Inject constructor(
         is LauncherScreen.OnboardingWelcome -> object : ScreenInputHandler {}
         is LauncherScreen.OnboardingPermissions -> onboardingPermissionsHandler
         is LauncherScreen.OnboardingStorage -> onboardingStorageHandler
+        is LauncherScreen.FolderMissing -> folderMissingHandler
         is LauncherScreen.DirectoryBrowser -> directoryBrowserHandler
         is LauncherScreen.RommGameDetail -> object : ScreenInputHandler {
             override fun onWest() {

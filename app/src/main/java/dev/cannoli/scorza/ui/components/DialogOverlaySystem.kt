@@ -98,6 +98,7 @@ internal fun SystemDialogs(
                 message = stringResource(R.string.library_switch_confirm),
                 buttonStyle = buttonStyle,
                 confirmLabel = stringResource(R.string.label_proceed),
+                title = stringResource(R.string.library_switch_confirm_title),
             )
         }
 

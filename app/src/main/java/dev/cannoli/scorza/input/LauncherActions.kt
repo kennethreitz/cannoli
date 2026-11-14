@@ -62,6 +62,7 @@ class LauncherActions @Inject constructor(
     private val settingsViewModel: SettingsViewModel,
     private val saveSyncService: SaveSyncService,
     private val pathsProvider: CannoliPathsProvider,
+    private val osdController: dev.cannoli.ui.components.OsdController,
 ) {
 
     private var pendingLaunch: (() -> DialogState?)? = null
@@ -208,6 +209,10 @@ class LauncherActions @Inject constructor(
         trackRecent: Boolean = true,
         reorderRecent: Boolean = false,
     ): DialogState? {
+        if (item is ListItem.RomItem && romFolderUnavailable(item.rom)) {
+            osdController.show(context.getString(dev.cannoli.ui.R.string.osd_rom_folder_unavailable))
+            return null
+        }
         val dialog = when (item) {
             is ListItem.RomItem -> launchSelectedRom(item.rom, resume)
             is ListItem.AppItem -> launchManager.launchApp(item.app)
@@ -233,6 +238,11 @@ class LauncherActions @Inject constructor(
         is ListItem.RomItem -> item.rom.path.absolutePath
         is ListItem.AppItem -> "/apps/${item.app.type.name}/${item.app.packageName}"
         else -> null
+    }
+
+    private fun romFolderUnavailable(rom: Rom): Boolean {
+        val romDir = pathsProvider.romDir
+        return rom.path.startsWith(romDir) && !dev.cannoli.scorza.util.StorageReach.isReachable(romDir)
     }
 
     private fun launchSelectedRom(rom: Rom, resume: Boolean): DialogState? {

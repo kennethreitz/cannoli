@@ -222,6 +222,13 @@ internal fun AppScreens(
                 buttonStyle = labels,
             )
         }
+        is LauncherScreen.FolderMissing -> {
+            inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.folderMissingHandler) }
+            dev.cannoli.scorza.ui.screens.FolderMissingScreen(
+                screen = currentScreen,
+                buttonStyle = labels,
+            )
+        }
         else -> {}
     }
 }

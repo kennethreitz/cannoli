@@ -81,6 +81,7 @@ class RetroAchievementsScreenNavTest {
         settingsHandler = mockk(relaxed = true),
         onboardingPermissionsHandler = mockk(relaxed = true),
         onboardingStorageHandler = mockk(relaxed = true),
+        folderMissingHandler = mockk(relaxed = true),
         directoryBrowserHandler = mockk(relaxed = true),
         inputTesterHandler = mockk(relaxed = true),
         saveStatePickerHandler = mockk(relaxed = true),

@@ -10,7 +10,7 @@ import dev.cannoli.scorza.ui.screens.ColorEntry
 import dev.cannoli.scorza.ui.screens.EmulatorMappingEntry
 import dev.cannoli.scorza.ui.viewmodel.SettingsCategory
 
-enum class BrowsePurpose { SD_ROOT, ROM_DIRECTORY, SETUP }
+enum class BrowsePurpose { SD_ROOT, ROM_DIRECTORY, SETUP, BOOT_ROM_DIRECTORY }
 
 sealed class LauncherScreen {
     interface ScrollableScreen {
@@ -333,6 +333,13 @@ sealed class LauncherScreen {
             selectedIndex = (selectedIndex + delta).coerceIn(0, (permissions.size - 1).coerceAtLeast(0))
         )
     }
+
+    data class FolderMissing(
+        val kind: dev.cannoli.scorza.boot.FolderKind,
+        val path: String,
+        val canQuit: Boolean,
+        val pendingRomFolder: String? = null,
+    ) : LauncherScreen(), OnboardingScreen
 
     data class OnboardingStorage(
         val volumes: List<Pair<String, String>> = emptyList(),

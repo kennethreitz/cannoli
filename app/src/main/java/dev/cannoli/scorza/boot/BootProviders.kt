@@ -61,6 +61,17 @@ object BootProviders {
         scheduleTimeout = { delayMs, action ->
             Handler(Looper.getMainLooper()).postDelayed(action, delayMs)
         },
+        missingFolder = {
+            val root = settings.sdCardRootOrNull
+            if (root != null && !dev.cannoli.scorza.util.StorageReach.isReachable(java.io.File(root))) {
+                BootState.FolderMissing(FolderKind.CANNOLI, root)
+            } else {
+                settings.reload()
+                settings.romDirectory
+                    .takeIf { it.isNotEmpty() && !dev.cannoli.scorza.util.StorageReach.isReachable(java.io.File(it)) }
+                    ?.let { BootState.FolderMissing(FolderKind.ROMS, it) }
+            }
+        },
     )
 }
 

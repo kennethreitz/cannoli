@@ -41,6 +41,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.cannoli.scorza.boot.BootSequencer
 import dev.cannoli.scorza.boot.BootState
 import dev.cannoli.scorza.boot.StartStorageDependentHolder
+import dev.cannoli.scorza.boot.takesInput
 import dev.cannoli.scorza.config.PlatformConfig
 import dev.cannoli.scorza.db.CannoliDatabase
 import dev.cannoli.scorza.db.CollectionsRepository
@@ -133,6 +134,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
     @field:dev.cannoli.scorza.di.IoScope @Inject lateinit var ioScope: kotlinx.coroutines.CoroutineScope
     @Inject lateinit var raLoginController: dev.cannoli.scorza.achievements.RaLoginController
     @Inject lateinit var raPendingDrainer: Provider<dev.cannoli.scorza.achievements.RaPendingDrainer>
+    @Inject lateinit var romFolderMonitor: Provider<dev.cannoli.scorza.scanner.RomFolderMonitor>
 
     private val isTv: Boolean by lazy { dev.cannoli.scorza.util.DeviceType.isTv(this) }
 
@@ -247,9 +249,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
                     scope = ioScope,
                 ) { runCatching { raPendingDrainer.get().drain() } }
                 reconnectDrain.start()
+                val folderMonitor = romFolderMonitor.get()
+                folderMonitor.start()
                 try {
                     awaitCancellation()
                 } finally {
+                    folderMonitor.stop()
                     reconnectDrain.stop()
                     backfill.setActive(false)
                 }
@@ -260,7 +265,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
             val boot by bootSequencer.state.collectAsState()
             val appSettings = if (boot is BootState.Ready) settingsViewModel.get().appSettings.collectAsState().value else null
             val themeFont = appSettings?.fontFamily ?: appFonts.mplus1Code
-            dev.cannoli.scorza.i18n.ProvideLocalizedResources(appSettings?.languageTag) {
+            val languageTag = appSettings?.languageTag ?: settings.language.takeIf { boot is BootState.FolderMissing }
+            dev.cannoli.scorza.i18n.ProvideLocalizedResources(languageTag) {
             CannoliTheme(fontFamily = themeFont, iconFontFamily = appFonts.mplus1Code) {
                 Surface(modifier = Modifier.fillMaxSize().displayCutoutPadding()) {
                     val menuGlyphPad by activeMappingHolder.active.collectAsState()
@@ -310,6 +316,19 @@ class MainActivity : ComponentActivity(), ActivityActions {
                             } else {
                                 Box(modifier = Modifier.fillMaxSize()) {}
                             }
+                        }
+                        is BootState.FolderMissing -> {
+                            LaunchedEffect(s) {
+                                nav.screenStack.clear()
+                                nav.screenStack.add(
+                                    LauncherScreen.FolderMissing(
+                                        kind = s.kind,
+                                        path = s.path,
+                                        canQuit = !dev.cannoli.scorza.util.DeviceType.isDefaultHome(this@MainActivity),
+                                    )
+                                )
+                            }
+                            ReadyNavGraph()
                         }
                         is BootState.Error -> BootErrorScreen(message = s.message)
                         is BootState.Ready -> ReadyNavGraph()
@@ -603,7 +622,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 bootSequencer.retry()
             }
             val bootVal = bootSequencer.state.value
-            if (bootVal !is BootState.NeedsSetup && bootVal !is BootState.NeedsPermission) return true
+            if (!bootVal.takesInput) return true
         }
         val cs = nav.currentScreen
         if (cs is LauncherScreen.EditButtons && editButtonsController.isListening
@@ -658,7 +677,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val bootValOnKeyDown = bootSequencer.state.value
-        if (!isReady && bootValOnKeyDown !is BootState.NeedsSetup && bootValOnKeyDown !is BootState.NeedsPermission) {
+        if (!isReady && !bootValOnKeyDown.takesInput) {
             if (bootValOnKeyDown is BootState.Error && AndroidGamepadKeyNames.isGamepadEvent(event)) {
                 bootSequencer.retry()
             }
@@ -698,6 +717,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
                     { inputDispatcher.onBack(); return true }
                 KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_MENU ->
                     { inputDispatcher.onStart(); return true }
+                KeyEvent.KEYCODE_BUTTON_X -> { inputDispatcher.onWest(); return true }
             }
         }
         return super.onKeyDown(keyCode, event)
@@ -705,7 +725,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         val bootValOnKeyUp = bootSequencer.state.value
-        if (!isReady && bootValOnKeyUp !is BootState.NeedsSetup && bootValOnKeyUp !is BootState.NeedsPermission) return true
+        if (!isReady && !bootValOnKeyUp.takesInput) return true
         val currentScreenForKey = nav.currentScreen
         if (currentScreenForKey is LauncherScreen.InputTester) {
             inputTesterController.dispatchKey(event, down = false)
@@ -722,7 +742,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         val bootValOnMotion = bootSequencer.state.value
-        if (!isReady && bootValOnMotion !is BootState.NeedsSetup && bootValOnMotion !is BootState.NeedsPermission) return super.onGenericMotionEvent(event)
+        if (!isReady && !bootValOnMotion.takesInput) return super.onGenericMotionEvent(event)
         val currentScreenForMotion = nav.currentScreen
         if (currentScreenForMotion is LauncherScreen.InputTester) {
             inputTesterController.dispatchMotion(event)

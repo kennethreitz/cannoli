@@ -17,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.cannoli.scorza.R
 import dev.cannoli.scorza.download.DownloadItem
 import dev.cannoli.scorza.ui.screens.DialogState
@@ -184,6 +185,7 @@ internal fun ConfirmOverlay(
     cancelLabel: String? = null,
     confirmLabel: String? = null,
     northLabel: String? = null,
+    title: String? = null,
 ) {
     Box(
         modifier = Modifier
@@ -191,13 +193,33 @@ internal fun ConfirmOverlay(
             .background(androidx.compose.ui.graphics.Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = message,
-            color = LocalCannoliColors.current.text,
-            fontFamily = LocalCannoliFont.current,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp)
-        )
+        val align = if (title != null) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 32.dp)
+                .then(
+                    if (title != null) Modifier.padding(bottom = footerReservation()).widthIn(max = 720.dp)
+                    else Modifier
+                ),
+            horizontalAlignment = if (title != null) Alignment.Start else Alignment.CenterHorizontally,
+        ) {
+            if (title != null) {
+                Text(
+                    text = title,
+                    style = androidx.compose.material3.MaterialTheme.typography.headlineLarge
+                        .copy(fontSize = 40.sp, lineHeight = 48.sp),
+                    color = LocalCannoliColors.current.text,
+                    textAlign = align,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            Text(
+                text = message,
+                color = LocalCannoliColors.current.text,
+                fontFamily = LocalCannoliFont.current,
+                textAlign = align,
+            )
+        }
         BottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)

@@ -700,6 +700,11 @@
 
     <!-- Boot error screen -->
     <string name="boot_error_title">Something went wrong</string>
+    <string name="cannoli_folder_missing_title">Cannoli folder not found</string>
+    <string name="rom_folder_missing_title">ROM folder not found</string>
+    <string name="folder_missing_body">Insert the removable storage with this folder:</string>
+    <string name="label_change_folder">CHANGE FOLDER</string>
+    <string name="osd_rom_folder_unavailable">ROM folder unavailable</string>
 
     <!-- Storage row (shared with onboarding) -->
     <string name="setup_folder_unset">Not selected</string>
@@ -877,7 +882,8 @@
     <!-- Shown before the ROM directory is changed or cleared, since the rescan that follows prunes
          database entries for every ROM that is not at the same relative path under the new
          directory. Cannoli and RetroAchievements are product names; leave them untranslated. -->
-    <string name="library_switch_confirm">Changing the ROM directory is a destructive action.\n\nAs Cannoli rescans, it clears ROMs it can no longer find from its database. Favorites, collections, game overrides, recently played and RetroAchievements Game ID overrides are all pruned for ROMs that do not appear under the same relative path in the new ROM directory.\n\nROM files, saves and save states on disk are untouched.</string>
+    <string name="library_switch_confirm_title">Please read carefully</string>
+    <string name="library_switch_confirm">Changing the ROM folder can reset Cannoli\'s metadata store.\n\nGames not found in the new folder are removed from Cannoli\'s database. This means favorites, collections and overrides can be cleared as a result.\n\nYour ROM files, saves and save states are not impacted.</string>
 
     <!-- IGM screen titles -->
     <!-- Title of the IGM shortcut list. -->
