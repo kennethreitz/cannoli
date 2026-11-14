@@ -146,6 +146,27 @@ class DirectoryLayoutTest {
         assertFalse(File(rom, "SNES").exists())
     }
 
+    @Test fun ensure_leaves_a_missing_custom_rom_folder_alone() {
+        val root = tmp.newFolder("cannoli")
+        val rom = File(tmp.root, "usb/Roms")
+        val assets = assets()
+        val config = dev.cannoli.scorza.config.PlatformConfig({ root }, assets)
+        DirectoryLayout.ensure(root, rom, assets, config)
+
+        assertFalse(rom.exists())
+        assertFalse(File(root, "Config/Internal/State/seeded_platforms.txt").exists())
+    }
+
+    @Test fun ensure_recreates_a_missing_default_rom_folder() {
+        val root = tmp.newFolder("cannoli")
+        val rom = File(root, "Roms")
+        val assets = assets()
+        val config = dev.cannoli.scorza.config.PlatformConfig({ root }, assets)
+        DirectoryLayout.ensure(root, rom, assets, config)
+
+        assertTrue(File(rom, "NES").isDirectory)
+    }
+
     @Test fun ensure_does_not_recreate_the_legacy_mappings_dir() {
         val root = tmp.newFolder("cannoli")
         val rom = tmp.newFolder("Roms")

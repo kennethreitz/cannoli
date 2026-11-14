@@ -22,8 +22,8 @@ object DirectoryLayout {
         context: Context? = null,
     ) {
         val paths = CannoliPaths(cannoliRoot)
+        if (romDirectory.startsWith(cannoliRoot)) romDirectory.mkdirs()
         listOf(
-            romDirectory,
             paths.artDir,
             paths.biosDir,
             paths.savesDir,
@@ -61,7 +61,8 @@ object DirectoryLayout {
         }
 
         val tags = platformConfig.getAllTags()
-        if (romDirNeedsScaffold(romDirectory)) {
+        if (!romDirectory.isDirectory) {
+        } else if (romDirNeedsScaffold(romDirectory)) {
             scaffoldRomFolders(romDirectory, tags)
             writeSeedRecord(paths.configState, tags)
         } else {
