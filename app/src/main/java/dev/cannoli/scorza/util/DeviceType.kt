@@ -2,6 +2,8 @@ package dev.cannoli.scorza.util
 
 import android.app.UiModeManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 
@@ -13,6 +15,12 @@ object DeviceType {
     fun isTv(context: Context): Boolean =
         (context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)
             ?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+
+    fun isDefaultHome(context: Context): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        return resolved?.activityInfo?.packageName == context.packageName
+    }
 
     // Every clause is a positive emulator marker. Deliberately absent: "generic" and "unknown"
     // fingerprint prefixes. Build.getString returns "unknown" for any unset property and

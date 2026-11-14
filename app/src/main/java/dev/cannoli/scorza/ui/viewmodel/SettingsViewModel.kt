@@ -1,7 +1,6 @@
 package dev.cannoli.scorza.ui.viewmodel
 
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
@@ -37,21 +36,12 @@ class SettingsViewModel @Inject constructor(
     private val rommStore: dev.cannoli.scorza.romm.RommConnectionStore,
     private val pathsProvider: dev.cannoli.scorza.di.CannoliPathsProvider,
 ) {
-    private var packageManager: PackageManager? = null
-    private var appPackageName: String? = null
     private var collectionsRepository: CollectionsRepository? = null
 
     private var platformsProvider: (() -> List<dev.cannoli.scorza.model.Platform>)? = null
 
     val isTelevision: Boolean
         get() = dev.cannoli.scorza.util.DeviceType.isTv(context)
-
-    private fun isDefaultLauncher(): Boolean {
-        val pm = packageManager ?: return false
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        val resolved = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        return resolved?.activityInfo?.packageName == appPackageName
-    }
 
     data class FontOption(val key: String, val label: String, val fontFamily: FontFamily, val typeface: android.graphics.Typeface?)
 
@@ -298,8 +288,6 @@ class SettingsViewModel @Inject constructor(
         cr: CollectionsRepository? = null,
         platforms: (() -> List<dev.cannoli.scorza.model.Platform>)? = null,
     ) {
-        packageManager = pm
-        appPackageName = pkgName
         if (cr != null) collectionsRepository = cr
         if (platforms != null) platformsProvider = platforms
         invalidateFontOptions()
@@ -790,7 +778,7 @@ class SettingsViewModel @Inject constructor(
             add(SettingsItem(SettingsKey.SWAP_PLAY_RESUME.id, R.string.setting_swap_play_resume, valueRes = onOff(settings.swapPlayResume)))
             add(SettingsItem(SettingsKey.MAIN_MENU_QUIT.id, R.string.setting_main_menu_quit, valueRes = onOff(settings.mainMenuQuit)))
             if (!isTelevision) {
-                val launcherLabel = if (isDefaultLauncher()) {
+                val launcherLabel = if (dev.cannoli.scorza.util.DeviceType.isDefaultHome(context)) {
                     R.string.setting_change_default_launcher
                 } else {
                     R.string.setting_set_default_launcher
