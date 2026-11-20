@@ -212,6 +212,17 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         get() = jsonRead { optBoolean(KEY_KITCHEN_CODE_BYPASS, false) }
         set(value) = jsonWrite { put(KEY_KITCHEN_CODE_BYPASS, value) }
 
+    // Fork: v2 dropped this opt-in; Kenneth's dual-screen routing still gates on it.
+    var experimentalFeatures: Boolean
+        get() = jsonRead { optBoolean(KEY_EXPERIMENTAL_FEATURES, BuildConfig.DEBUG) }
+        set(value) = jsonWrite { put(KEY_EXPERIMENTAL_FEATURES, value) }
+
+
+
+    var dualScreenLaunching: Boolean
+        get() = jsonRead { optBoolean(KEY_DUAL_SCREEN_LAUNCHING, false) }
+        set(value) = jsonWrite { put(KEY_DUAL_SCREEN_LAUNCHING, value) }
+
     var showWifi: Boolean
         get() = jsonRead { optBoolean(KEY_SHOW_WIFI, true) }
         set(value) = jsonWrite { put(KEY_SHOW_WIFI, value) }
@@ -475,11 +486,27 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         get() = jsonRead { optBoolean(KEY_ROMM_SAVE_SYNC_ENABLED, false) }
         set(value) = jsonWrite { put(KEY_ROMM_SAVE_SYNC_ENABLED, value) }
 
+    var rommSaveSyncIntervalMinutes: Int
+        get() = jsonRead {
+            optInt(KEY_ROMM_SAVE_SYNC_INTERVAL_MINUTES, DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES)
+                .coerceIn(MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES)
+        }
+        set(value) = jsonWrite {
+            put(
+                KEY_ROMM_SAVE_SYNC_INTERVAL_MINUTES,
+                value.coerceIn(MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES),
+            )
+        }
+
     var rommSaveBackupCount: Int
         get() = jsonRead { optInt(KEY_ROMM_SAVE_BACKUP_COUNT, 5) }
         set(value) = jsonWrite { put(KEY_ROMM_SAVE_BACKUP_COUNT, value.coerceAtLeast(0)) }
 
     companion object {
+        const val DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 3
+        const val MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 1
+        const val MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES = 24 * 60
+        val ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES = listOf(1, 3, 10, 30, 60, 240)
         private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val KEY_SD_ROOT = "sd_root"
         private const val KEY_ROM_DIRECTORY = "rom_directory"
@@ -502,6 +529,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         private const val KEY_SWAP_PLAY_RESUME = "swap_play_resume"
         private const val KEY_MAIN_MENU_QUIT = "main_menu_quit"
         private const val KEY_KITCHEN_CODE_BYPASS = "kitchen_code_bypass"
+        private const val KEY_EXPERIMENTAL_FEATURES = "experimental_features"
+        private const val KEY_DUAL_SCREEN_LAUNCHING = "dual_screen_launching"
         private const val KEY_SHOW_WIFI = "show_wifi"
         private const val KEY_SHOW_BLUETOOTH = "show_bluetooth"
         private const val KEY_SHOW_VPN = "show_vpn"
@@ -555,6 +584,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         private const val KEY_ROMM_DEVICE_NAME = "romm_device_name"
         private const val KEY_ROMM_DEVICE_CLIENT_VERSION = "romm_device_client_version"
         private const val KEY_ROMM_SAVE_SYNC_ENABLED = "romm_save_sync_enabled"
+        private const val KEY_ROMM_SAVE_SYNC_INTERVAL_MINUTES = "romm_save_sync_interval_minutes"
         private const val KEY_ROMM_SAVE_BACKUP_COUNT = "romm_save_backup_count"
     }
 }

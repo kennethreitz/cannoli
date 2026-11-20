@@ -28,6 +28,7 @@ import dev.cannoli.scorza.download.DownloadStaging
 import dev.cannoli.scorza.download.Downloader
 import dev.cannoli.scorza.romm.download.RommDownloadHandler
 import dev.cannoli.scorza.romm.download.RommInstaller
+import dev.cannoli.scorza.romm.upload.RommRomUploader
 import dev.cannoli.scorza.romm.sync.DeviceRegistrar
 import dev.cannoli.scorza.romm.sync.LocalSaveResolver
 import dev.cannoli.scorza.romm.sync.PendingConflictStore
@@ -63,6 +64,7 @@ object RommModule {
             baseUrlProvider = { store.host },
             clientProvider = { http.client() },
             downloadClientProvider = { http.downloadClient() },
+            uploadClientProvider = { http.uploadClient() },
         )
 
     @Provides @Singleton
@@ -189,6 +191,21 @@ object RommModule {
     @Provides @Singleton
     fun provideRommLibrary(db: RommDatabase): RommLibrary =
         CachedRommLibrary(db)
+
+    @Provides @Singleton
+    fun provideRommRomUploader(
+        client: RommClient,
+        store: RommConnectionStore,
+        matcher: dev.cannoli.scorza.romm.sync.RommCacheMatcher,
+        platformMap: PlatformMap,
+        syncCoordinator: RommSyncCoordinator,
+    ): RommRomUploader = RommRomUploader(
+        client = client,
+        connection = store,
+        matcher = matcher,
+        platformMap = platformMap,
+        syncCoordinator = syncCoordinator,
+    )
 
     @Provides @Singleton
     fun provideRommBrowseViewModel(
@@ -318,5 +335,16 @@ object RommModule {
         paths: CannoliPathsProvider,
         @IoScope ioScope: CoroutineScope,
         http: RommHttp,
-    ): SyncScheduler = SyncScheduler(context, service, statusHolder, platformConfig, settings, { paths.romDir }, ioScope, http)
+        favorites: dev.cannoli.scorza.romm.sync.RommFavoritesSync,
+    ): SyncScheduler = SyncScheduler(
+        context,
+        service,
+        statusHolder,
+        platformConfig,
+        settings,
+        { paths.romDir },
+        ioScope,
+        http,
+        favorites = favorites,
+    )
 }

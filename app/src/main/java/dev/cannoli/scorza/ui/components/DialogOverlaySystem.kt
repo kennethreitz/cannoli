@@ -71,6 +71,37 @@ internal fun SystemDialogs(
                 buttonStyle = buttonStyle,
             )
         }
+        is DialogState.RommUploadConfirm -> {
+            ConfirmOverlay(
+                message = stringResource(R.string.romm_upload_confirm, dialogState.fileName, dialogState.sizeLabel),
+                buttonStyle = buttonStyle,
+            )
+        }
+        is DialogState.RommUploadProgress -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                dev.cannoli.scorza.ui.screens.HousekeepingScreen(
+                    kind = dev.cannoli.scorza.ui.screens.HousekeepingKind.ROMM_UPLOAD,
+                    progress = dialogState.progress,
+                    statusLabel = stringResource(
+                        R.string.romm_upload_status,
+                        dialogState.fileName,
+                        (dialogState.progress * 100f).toInt().coerceIn(0, 100),
+                    ),
+                )
+                BottomBar(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(screenPadding),
+                    leftItems = listOf(buttonStyle.back to stringResource(R.string.label_cancel)),
+                    rightItems = emptyList(),
+                )
+            }
+        }
+        is DialogState.RommUploadResult -> {
+            MessageOverlay(
+                message = dialogState.message,
+                buttonStyle = buttonStyle,
+                buttonLabel = stringResource(R.string.label_back),
+            )
+        }
         is DialogState.RAPreloadResult -> {
             MessageOverlay(
                 message = dialogState.message,

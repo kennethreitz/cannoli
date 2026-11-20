@@ -1,10 +1,13 @@
 package dev.cannoli.scorza.launcher
 
+import dev.cannoli.scorza.model.App
+import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.model.Rom
 import dev.cannoli.scorza.settings.SettingsRepository
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -25,7 +28,13 @@ class LaunchManagerSlotTest {
         )
     }
 
-    private fun manager(root: File): LaunchManager {
+    private fun manager(
+        root: File,
+        launchState: LaunchState = mockk(relaxed = true),
+        apkLauncher: ApkLauncher = mockk(relaxed = true),
+        gameOverrides: dev.cannoli.scorza.db.GameOverrideStore? = null,
+        dualScreenActive: Boolean = false,
+    ): LaunchManager {
         val settings = mockk<SettingsRepository>(relaxed = true)
         every { settings.sdCardRoot } returns root.absolutePath
         return LaunchManager(
@@ -33,10 +42,14 @@ class LaunchManagerSlotTest {
             settings = settings,
             platformConfig = mockk(relaxed = true),
             retroArchLauncher = mockk(relaxed = true),
-            apkLauncher = mockk(relaxed = true),
+            apkLauncher = apkLauncher,
             delfinoLauncher = mockk(relaxed = true),
-            launchState = mockk(relaxed = true),
+            launchState = launchState,
             activeMappingHolder = mockk(relaxed = true),
+            gameOverrides = gameOverrides,
+            activityDisplayRouter = mockk<ActivityDisplayRouter>(relaxed = true) {
+                every { isDualScreenActive } returns dualScreenActive
+            },
         )
     }
 
@@ -56,4 +69,57 @@ class LaunchManagerSlotTest {
         assertEquals(false, occ[2])
         assertEquals(false, occ[0])
     }
+
+    @Test
+    fun `dual-screen dispatch releases launch guard without an activity resume`() {
+        val root = tmp.newFolder()
+        val launchState = LaunchState()
+        val apkLauncher = mockk<ApkLauncher>(relaxed = true)
+        every { apkLauncher.launch("dev.example.game") } returns LaunchResult.Success
+        val mgr = manager(root, launchState, apkLauncher, dualScreenActive = true)
+
+        val dialog = mgr.launchApp(
+            App(1L, AppType.PORT, "Example", "dev.example.game"),
+        )
+
+        assertEquals(null, dialog)
+        assertFalse(launchState.launching)
+        assertTrue(launchState.gameActive.value)
+    }
+
+    @Test
+    fun `dual-screen tools do not start a game session`() {
+        val root = tmp.newFolder()
+        val launchState = LaunchState()
+        val apkLauncher = mockk<ApkLauncher>(relaxed = true)
+        every { apkLauncher.launch("dev.example.tool") } returns LaunchResult.Success
+        val mgr = manager(root, launchState, apkLauncher, dualScreenActive = true)
+
+        val dialog = mgr.launchApp(
+            App(1L, AppType.TOOL, "Example", "dev.example.tool"),
+        )
+
+        assertEquals(null, dialog)
+        assertFalse(launchState.launching)
+        assertFalse(launchState.gameActive.value)
+    }
+    @Test fun `resume scan skips failed override and continues with other games`() {
+        val root = tmp.newFolder()
+        val overrides = mockk<dev.cannoli.scorza.db.GameOverrideStore>()
+        every { overrides.get(1L) } throws RuntimeException("no such column: source")
+        every { overrides.get(2L) } returns dev.cannoli.scorza.config.EmulatorChoice(
+            dev.cannoli.scorza.config.EmulatorSource.Embedded,
+            "snes9x_libretro",
+        )
+        val mgr = manager(root, gameOverrides = overrides)
+        val broken = rom(root)
+        val healthy = broken.copy(
+            id = 2L,
+            path = File(root, "roms/snes/Healthy.sfc"),
+        )
+        // The broken rom's override lookup throws, so only the healthy one gets a state file.
+        File(mgr.saveStateBasePath(healthy)).apply { parentFile!!.mkdirs(); writeText("state") }
+        assertEquals(setOf(healthy.path.absolutePath), mgr.findResumableRoms(listOf(broken, healthy)))
+    }
+
 }

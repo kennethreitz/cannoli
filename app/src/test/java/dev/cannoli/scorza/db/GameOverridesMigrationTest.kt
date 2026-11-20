@@ -37,6 +37,21 @@ class GameOverridesMigrationTest {
             )
             """.trimIndent(),
         )
+        // v10's table, so migration 13 (slot-keyed pending conflicts) has something to rewrite.
+        conn.execSQL(
+            """
+            CREATE TABLE pending_conflicts (
+                game_key TEXT PRIMARY KEY,
+                rom_id INTEGER NOT NULL,
+                display_name TEXT NOT NULL,
+                server_save_id INTEGER,
+                server_content_hash TEXT,
+                server_updated_at TEXT,
+                detected_at INTEGER NOT NULL,
+                dismissed_hash TEXT
+            )
+            """.trimIndent(),
+        )
         conn.execSQL("PRAGMA user_version = 11")
         return conn
     }
@@ -123,4 +138,45 @@ class GameOverridesMigrationTest {
         }
         conn.close()
     }
+    @Test fun `already stamped legacy schemas heal without losing overrides or version`() {
+        for (version in listOf(12, 13, 99)) {
+            val conn = v11Connection("stranded-$version")
+            seed(conn, 1, "nestopia_libretro", "Internal", null)
+            seed(conn, 2, null, "App", "com.fastemulator.gba")
+            seed(conn, 3, "other_libretro", "RicottaArch", null)
+            seed(conn, 4, null, null, "com.example.emulator")
+            conn.execSQL("PRAGMA user_version = $version")
+
+            assertEquals(true, Migrations.repairGameOverrideSource(conn))
+            assertEquals("Embedded", sourceOf(conn, 1))
+            assertEquals("Standalone", sourceOf(conn, 2))
+            assertEquals("Embedded", sourceOf(conn, 3))
+            assertEquals("Standalone", sourceOf(conn, 4))
+            conn.prepare("SELECT core_id, runner FROM game_overrides WHERE rom_id = 1").use {
+                it.step()
+                assertEquals("nestopia_libretro", it.getText(0))
+                assertEquals("Internal", it.getText(1))
+            }
+            conn.prepare("SELECT app_package FROM game_overrides WHERE rom_id = 2").use {
+                it.step()
+                assertEquals("com.fastemulator.gba", it.getText(0))
+            }
+            assertEquals(false, Migrations.repairGameOverrideSource(conn))
+            conn.prepare("PRAGMA user_version").use { it.step(); assertEquals(version, it.getInt(0)) }
+            conn.prepare("SELECT COUNT(*) FROM game_overrides").use { it.step(); assertEquals(4, it.getInt(0)) }
+            conn.execSQL("DELETE FROM roms WHERE id = 1")
+            conn.prepare("SELECT COUNT(*) FROM game_overrides").use { it.step(); assertEquals(3, it.getInt(0)) }
+            conn.close()
+        }
+    }
+
+    @Test fun `healthy override schema is untouched`() {
+        val conn = v11Connection("healthy")
+        seed(conn, 1, "nestopia_libretro", "Internal", null)
+        Migrations.applyFrom(conn, 11)
+        assertEquals(false, Migrations.repairGameOverrideSource(conn))
+        assertEquals("Internal", sourceOf(conn, 1))
+        conn.close()
+    }
+
 }

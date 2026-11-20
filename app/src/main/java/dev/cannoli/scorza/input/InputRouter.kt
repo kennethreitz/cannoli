@@ -172,6 +172,20 @@ class InputRouter @Inject constructor(
         nav.selectHeld = false
     }
 
+    fun cancelPendingInput() {
+        dialogHandler.cancelSelectHold()
+        gameListHandler.cancelPendingInput()
+        nav.selectDown = false
+        nav.selectHeld = false
+    }
+
+    /**
+     * Returns the appropriate handler for a ScrollableScreen instance. Used by [AppNavGraph] to
+     * push a handler via ScreenInput for screens that don't have a dedicated handler class --
+     * the handler is generated inline from the [scrollable] factory each time the screen is
+     * composed. Other screens (with dedicated handler classes like [SystemListInputHandler])
+     * push their handler directly via this router's public fields, bypassing this method.
+     */
     fun currentHandler(): ScreenInputHandler = when (val screen = nav.currentScreen) {
         is LauncherScreen.ScrollableScreen -> scrollableHandlerFor(screen)
         else -> object : ScreenInputHandler {}

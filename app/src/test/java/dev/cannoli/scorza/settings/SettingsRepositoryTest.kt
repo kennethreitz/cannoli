@@ -141,4 +141,31 @@ class SettingsRepositoryTest {
         settings.sdCardRoot = tmp.root.absolutePath
         assertEquals(IgmSettingsMode.CURATED, settings.igmSettingsMode)
     }
+
+    @Test fun `dual-screen launching defaults off and can be enabled`() {
+        val settings = newRepo()
+
+        assertFalse(settings.dualScreenLaunching)
+        settings.dualScreenLaunching = true
+        assertTrue(settings.dualScreenLaunching)
+    }
+
+    @Test fun `save sync polling defaults to three minutes and stays within safe bounds`() {
+        val settings = newRepo()
+
+        assertEquals(3, settings.rommSaveSyncIntervalMinutes)
+        assertEquals(
+            listOf(1, 3, 10, 30, 60, 240),
+            SettingsRepository.ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES,
+        )
+
+        settings.rommSaveSyncIntervalMinutes = 240
+        assertEquals(240, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = 0
+        assertEquals(SettingsRepository.MIN_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
+
+        settings.rommSaveSyncIntervalMinutes = Int.MAX_VALUE
+        assertEquals(SettingsRepository.MAX_ROMM_SAVE_SYNC_INTERVAL_MINUTES, settings.rommSaveSyncIntervalMinutes)
+    }
 }

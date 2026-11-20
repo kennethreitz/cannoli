@@ -179,6 +179,9 @@ internal fun DialogInputHandler.backDialog(): Boolean {
                     nav.dialogState.value = DialogState.RommDownloads(fromQuickMenu = ds.fromQuickMenu)
             }
         }
+        is DialogState.RommUploadConfirm -> restoreContextMenu()
+        is DialogState.RommUploadProgress -> cancelRommUpload()
+        is DialogState.RommUploadResult -> dismissRommUploadResult(ds)
         is DialogState.RAPreloadResult -> {
             if (pendingContextReturn != null) restoreContextMenu()
             else nav.dialogState.value = DialogState.None

@@ -48,6 +48,7 @@ class QuickMenuAboutDebugActionTest {
             context = ApplicationProvider.getApplicationContext(),
             rommStore = mockk(relaxed = true),
             pathsProvider = CannoliPathsProvider(settings),
+            activityDisplayRouter = mockk(relaxed = true),
         )
         handler = testDialogInputHandler(
             nav = nav,

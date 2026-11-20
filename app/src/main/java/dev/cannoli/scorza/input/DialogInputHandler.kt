@@ -80,7 +80,10 @@ class DialogInputHandler @Inject constructor(
     internal val saveSyncStatusHolder: dev.cannoli.scorza.romm.sync.SaveSyncStatusHolder,
     internal val osdController: dev.cannoli.ui.components.OsdController,
     internal val rommDevicePairing: dev.cannoli.scorza.romm.RommDevicePairing,
+    // Fork: RomM ROM upload. Nullable with a default so tests can build the handler without it.
+    internal val rommRomUploader: dev.cannoli.scorza.romm.upload.RommRomUploader? = null,
 ) : DialogPrecedence {
+    internal var romUploadJob: kotlinx.coroutines.Job? = null
     internal val applyingConflicts = java.util.concurrent.atomic.AtomicBoolean(false)
     internal val quickMenuRebuild = java.util.concurrent.atomic.AtomicBoolean(false)
     private val selectHoldHandler = Handler(Looper.getMainLooper())

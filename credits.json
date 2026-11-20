@@ -2,7 +2,8 @@
   "inspiration": [
     {"name":  "Hallie", "detail":  "My beautiful wife who makes me better in every way"},
     { "name": "Shaun Inman", "detail": "MinUI" },
-    {"name":  "Abraham McCampbell", "detail":  "Cannoli Logo"}
+    {"name":  "Abraham McCampbell", "detail":  "Cannoli Logo"},
+    {"name":  "Kenneth Reitz", "detail":  "Second Screen"}
   ],
   "fonts": [
     { "name": "M+ Fonts Project", "what": "M PLUS 1 Code", "license": "OFL" },

@@ -36,6 +36,7 @@ class RommMenuRowTest {
         assertEquals(
             listOf(
                 RommSaveSyncRow.TOGGLE,
+                RommSaveSyncRow.INTERVAL,
                 RommSaveSyncRow.BACKUPS,
                 RommSaveSyncRow.HISTORY,
                 RommSaveSyncRow.CONFLICTS,
@@ -45,4 +46,12 @@ class RommMenuRowTest {
             all,
         )
     }
+
+    @Test fun `save sync interval row follows the toggle only while sync is enabled`() {
+        val enabled = RommSaveSyncRow.visibleRows(supported = true, enabled = true, pendingConflicts = 0, syncErrors = 0, hasBackups = false)
+        val disabled = RommSaveSyncRow.visibleRows(supported = true, enabled = false, pendingConflicts = 0, syncErrors = 0, hasBackups = false)
+        assertEquals(RommSaveSyncRow.INTERVAL, enabled[1])
+        assertEquals(false, disabled.contains(RommSaveSyncRow.INTERVAL))
+    }
+
 }

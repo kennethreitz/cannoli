@@ -246,6 +246,10 @@ sealed interface DialogState {
         override fun withSelectedIndex(index: Int) = copy(selectedIndex = index)
     }
     data class RescanProgress(val progress: Float, val label: String) : DialogState
+    // Fork: RomM ROM upload flow.
+    data class RommUploadConfirm(val gameName: String, val fileName: String, val sizeLabel: String) : DialogState
+    data class RommUploadProgress(val gameName: String, val fileName: String, val progress: Float = 0f) : DialogState
+    data class RommUploadResult(val success: Boolean, val message: String, val returnToContextMenu: Boolean) : DialogState
     data class RommConfirm(val action: RommConfirmAction, val downloadKey: String? = null, val fromQuickMenu: Boolean = false) : DialogState
     data class SyncHistory(val entries: List<SyncHistoryRow>, override val selectedIndex: Int = 0, val fromSaveSyncMenu: Boolean = false) : ListDialog {
         override fun withSelectedIndex(index: Int) = copy(selectedIndex = index)
@@ -285,6 +289,7 @@ data class RommCollectionToggleItem(val group: dev.cannoli.scorza.romm.RommColle
 enum class ConflictChoice { KEEP_LOCAL, USE_SERVER, SKIP }
 data class ConflictRow(
     val gameKey: String,
+    val slot: String = dev.cannoli.scorza.romm.sync.DEFAULT_SLOT,
     val name: String,
     val choice: ConflictChoice = ConflictChoice.SKIP,
     val localMillis: Long? = null,

@@ -99,6 +99,9 @@ enum class SettingsKey(val id: String) {
     REGENERATE_SYSTEM_FOLDERS("regenerate_system_folders"),
     RESET_CUSTOM_CONFIG("reset_custom_config"),
     KITCHEN_CODE_BYPASS("kitchen_code_bypass"),
+    // Fork: dual-screen launching (experimental).
+    EXPERIMENTAL_FEATURES("experimental_features"),
+    DUAL_SCREEN_LAUNCHING("dual_screen_launching"),
     RELEASE_CHANNEL("release_channel"),
 
     AUDIT_EMULATOR_INTENTS("audit_emulator_intents"),

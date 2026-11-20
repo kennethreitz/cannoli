@@ -257,6 +257,11 @@ internal fun DialogInputHandler.buildSaveSyncMenu(
                     ),
                     cycles = true,
                 )
+                RommSaveSyncRow.INTERVAL -> dev.cannoli.scorza.ui.screens.PickerItem(
+                    label = context.getString(dev.cannoli.ui.R.string.setting_romm_save_sync_interval),
+                    value = saveSyncIntervalLabel(settings.rommSaveSyncIntervalMinutes),
+                    cycles = true,
+                )
                 RommSaveSyncRow.BACKUPS -> dev.cannoli.scorza.ui.screens.PickerItem(
                     label = context.getString(dev.cannoli.scorza.R.string.setting_romm_save_backups),
                     value = if (backupCount <= 0) context.getString(dev.cannoli.scorza.R.string.value_off)
@@ -281,6 +286,14 @@ internal fun DialogInputHandler.buildSaveSyncMenu(
         onCycle = { index, delta ->
             when (rows.getOrNull(index)) {
                 RommSaveSyncRow.TOGGLE -> toggleSaveSync(pendingConflicts)
+                RommSaveSyncRow.INTERVAL -> {
+                    val options = dev.cannoli.scorza.settings.SettingsRepository.ROMM_SAVE_SYNC_INTERVAL_OPTIONS_MINUTES
+                    val idx = options.indexOf(settings.rommSaveSyncIntervalMinutes).let {
+                        if (it < 0) options.indexOf(dev.cannoli.scorza.settings.SettingsRepository.DEFAULT_ROMM_SAVE_SYNC_INTERVAL_MINUTES) else it
+                    }
+                    settings.rommSaveSyncIntervalMinutes = options[(idx + delta).mod(options.size)]
+                    nav.dialogState.value = buildSaveSyncMenu(pendingConflicts, RommSaveSyncRow.INTERVAL)
+                }
                 RommSaveSyncRow.BACKUPS -> {
                     val options = intArrayOf(0, 3, 5, 10)
                     val idx = options.indexOf(settings.rommSaveBackupCount).let { if (it < 0) 0 else it }
@@ -291,6 +304,12 @@ internal fun DialogInputHandler.buildSaveSyncMenu(
             }
         },
     ) { index -> onSaveSyncRowSelected(rows.getOrNull(index), pendingConflicts) }
+}
+
+private fun DialogInputHandler.saveSyncIntervalLabel(minutes: Int): String = when {
+    minutes == 60 -> context.getString(dev.cannoli.ui.R.string.romm_save_sync_interval_one_hour)
+    minutes == 240 -> context.getString(dev.cannoli.ui.R.string.romm_save_sync_interval_four_hours)
+    else -> context.getString(dev.cannoli.ui.R.string.romm_save_sync_interval_minutes, minutes)
 }
 
 private fun DialogInputHandler.toggleSaveSync(pendingConflicts: Int) {

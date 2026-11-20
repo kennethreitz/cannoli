@@ -1,6 +1,5 @@
 package dev.cannoli.scorza.launcher
 
-import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,6 +11,8 @@ import dev.cannoli.igm.IgmInputMapping
 import dev.cannoli.igm.RicottaLaunchParams
 import dev.cannoli.ricotta.RicottaLaunchTranslator
 import dev.cannoli.scorza.i18n.LocaleOverride
+import dev.cannoli.scorza.util.ErrorLog
+import dev.cannoli.scorza.util.LaunchLog
 import java.io.File
 
 data class RicottaIgm(
@@ -32,7 +33,10 @@ data class RicottaIgm(
     val shortcuts: Map<dev.cannoli.igm.ShortcutAction, Set<Int>> = emptyMap(),
 )
 
-class RetroArchLauncher(private val context: Context) {
+class RetroArchLauncher(
+    private val context: Context,
+    private val activityDisplayRouter: ActivityDisplayRouter,
+) {
     fun launchRicotta(
         romFile: File,
         coreId: String,
@@ -65,7 +69,19 @@ class RetroArchLauncher(private val context: Context) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
-        return context.startActivityNoAnim(intent, "Failed to launch RicottaArch")
+        // Fork: dual-screen routing sends the game to the game display when it is enabled.
+        val launchDisplayId = activityDisplayRouter.gameLaunchDisplayId()
+        LaunchLog.write(
+            "ricotta request core=$coreId rom=${romFile.absolutePath} exists=${romFile.exists()} " +
+                "displayPolicy=${launchDisplayId ?: "system-default"} " +
+                activityDisplayRouter.diagnosticSummary()
+        )
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch RicottaArch",
+            launchDisplayId = launchDisplayId,
+            logLabel = "ricotta",
+        )
     }
 
 }
@@ -73,11 +89,34 @@ class RetroArchLauncher(private val context: Context) {
 fun Context.isPackageInstalled(packageName: String): Boolean =
     packageManager.isPackageInstalled(packageName)
 
-fun Context.startActivityNoAnim(intent: Intent, fallbackMsg: String): LaunchResult = try {
-    startActivity(intent, ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle())
-    LaunchResult.Success
-} catch (e: Exception) {
-    LaunchResult.Error(e.message ?: fallbackMsg)
+fun Context.startActivityNoAnim(
+    intent: Intent,
+    fallbackMsg: String,
+    launchDisplayId: Int? = null,
+    logLabel: String = "activity",
+): LaunchResult {
+    val component = intent.component?.flattenToShortString()
+        ?: intent.`package`
+        ?: intent.action
+        ?: "<implicit>"
+    LaunchLog.write(
+        "$logLabel dispatch component=$component display=${launchDisplayId ?: "system-default"} " +
+            "flags=0x${intent.flags.toString(16)} extras=${intent.extras?.keySet()?.sorted() ?: emptyList<String>()}"
+    )
+    if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
+        LaunchLog.write("$logLabel rejected unresolved component=$component")
+        return LaunchResult.Error(fallbackMsg)
+    }
+    return try {
+        val dispatchIntent = ExternalGameSessionActivity.wrap(this, intent, launchDisplayId)
+        startActivity(dispatchIntent, noAnimationActivityOptions(launchDisplayId))
+        LaunchLog.write("$logLabel accepted component=$component")
+        LaunchResult.Success
+    } catch (e: Exception) {
+        LaunchLog.error("$logLabel failed component=$component", e)
+        ErrorLog.error("$logLabel activity launch failed component=$component", e)
+        LaunchResult.Error(e.message ?: fallbackMsg)
+    }
 }
 
 fun Context.romFileProviderUri(file: File): Uri =

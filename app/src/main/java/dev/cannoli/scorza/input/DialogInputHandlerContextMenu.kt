@@ -148,6 +148,14 @@ internal fun DialogInputHandler.onContextMenuConfirm(state: DialogState.ContextM
             if (rom == null) return
             openEmulatorPicker(rom)
         }
+        selected == MENU_UPLOAD_TO_ROMM -> {
+            if (rom == null) return
+            nav.dialogState.value = DialogState.RommUploadConfirm(
+                gameName = rom.displayName,
+                fileName = rom.path.name,
+                sizeLabel = android.text.format.Formatter.formatFileSize(context, rom.path.length()),
+            )
+        }
         selected == MENU_ROMM_SAVES -> {
             if (rom == null) return
             openRommSavesMenu()
@@ -488,6 +496,10 @@ fun DialogInputHandler.buildGameContextOptions(item: ListItem, glState: GameList
             if (item is ListItem.RomItem && rommSavesOptions(item.rom).isNotEmpty()) {
                 val idx = indexOf(MENU_RENAME)
                 if (idx >= 0) add(idx, MENU_ROMM_SAVES) else add(MENU_ROMM_SAVES)
+            }
+            if (item is ListItem.RomItem && rommRomUploader?.shouldOffer(item.rom) == true) {
+                val idx = indexOf(MENU_RENAME)
+                if (idx >= 0) add(idx, MENU_UPLOAD_TO_ROMM) else add(MENU_UPLOAD_TO_ROMM)
             }
             if (item is ListItem.RomItem &&
                 dev.cannoli.igm.GuideManager(

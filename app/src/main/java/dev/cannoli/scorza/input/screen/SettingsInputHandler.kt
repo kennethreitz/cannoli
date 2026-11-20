@@ -2,7 +2,9 @@ package dev.cannoli.scorza.input.screen
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.os.Process
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.scopes.ActivityScoped
 import dev.cannoli.scorza.config.PlatformConfig
@@ -15,7 +17,13 @@ import dev.cannoli.scorza.input.LauncherActions
 import dev.cannoli.scorza.input.PageJump
 import dev.cannoli.scorza.input.ScreenInputHandler
 import dev.cannoli.scorza.launcher.ApkLauncher
+import dev.cannoli.scorza.launcher.AndroidShortcutTarget
+import dev.cannoli.scorza.launcher.GameHubTarget
+import dev.cannoli.scorza.launcher.InstalledCoreService
 import dev.cannoli.scorza.launcher.IntentAuditor
+import dev.cannoli.scorza.launcher.StarboardLibrary
+import dev.cannoli.scorza.launcher.StarboardTarget
+import dev.cannoli.scorza.launcher.isPackageInstalled
 import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.model.VirtualPlatformTags
 import dev.cannoli.scorza.navigation.BrowsePurpose
@@ -52,6 +60,7 @@ class SettingsInputHandler @Inject constructor(
     private val settingsViewModel: SettingsViewModel,
     private val dialogInputHandler: dev.cannoli.scorza.input.DialogInputHandler,
     private val launcherActions: LauncherActions,
+    private val starboardLibrary: StarboardLibrary,
     private val activityActions: ActivityActions,
     private val emulatorMappingBuilder: dev.cannoli.scorza.input.EmulatorMappingBuilder,
     @ApplicationContext private val context: Context,
@@ -73,7 +82,11 @@ class SettingsInputHandler @Inject constructor(
 
     override fun onLeft() {
         if (settingsViewModel.state.value.inSubList) {
+            val key = settingsViewModel.getSelectedItem()?.key
             settingsViewModel.cycleSelected(-1, repeatCount = nav.lastKeyRepeatCount)
+            if (key == SettingsKey.DUAL_SCREEN_LAUNCHING.id || key == SettingsKey.EXPERIMENTAL_FEATURES.id) {
+                activityActions.applyLauncherDisplayPreference()
+            }
             if (settingsViewModel.getSelectedItem()?.key == SettingsKey.RELEASE_CHANNEL.id) {
                 ioScope.launch { updateManager.checkForUpdate() }
             }
@@ -94,7 +107,11 @@ class SettingsInputHandler @Inject constructor(
 
     override fun onRight() {
         if (settingsViewModel.state.value.inSubList) {
+            val key = settingsViewModel.getSelectedItem()?.key
             settingsViewModel.cycleSelected(1, repeatCount = nav.lastKeyRepeatCount)
+            if (key == SettingsKey.DUAL_SCREEN_LAUNCHING.id || key == SettingsKey.EXPERIMENTAL_FEATURES.id) {
+                activityActions.applyLauncherDisplayPreference()
+            }
             if (settingsViewModel.getSelectedItem()?.key == SettingsKey.RELEASE_CHANNEL.id) {
                 ioScope.launch { updateManager.checkForUpdate() }
             }
@@ -228,6 +245,7 @@ class SettingsInputHandler @Inject constructor(
                 settingsViewModel.save()
                 settingsViewModel.exitSubList()
             }
+            SettingsKey.EXPERIMENTAL_FEATURES, SettingsKey.DUAL_SCREEN_LAUNCHING,
             SettingsKey.LANGUAGE, SettingsKey.SWAP_PLAY_RESUME, SettingsKey.MAIN_MENU_QUIT,
             SettingsKey.BG_IMAGE, SettingsKey.BG_TINT, SettingsKey.FONT, SettingsKey.TEXT_SIZE,
             SettingsKey.ART_SCALE, SettingsKey.ART_WIDTH, SettingsKey.PORTRAIT_MARGIN,
@@ -410,7 +428,7 @@ class SettingsInputHandler @Inject constructor(
     private fun getInstalledLauncherApps(): List<Pair<String, String>> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos = context.packageManager.queryIntentActivities(intent, 0)
-        return resolveInfos
+        val apps = resolveInfos
             .mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
                 if (pkg == context.packageName) return@mapNotNull null
@@ -418,7 +436,38 @@ class SettingsInputHandler @Inject constructor(
                 label to pkg
             }
             .distinctBy { it.second }
+        return (apps + getPinnedLauncherShortcuts() + getGameHubGames() + getStarboardGames())
+            .distinctBy { it.second }
             .sortedBy { it.first.lowercase(java.util.Locale.ROOT) }
+    }
+
+    private fun getGameHubGames(): List<Pair<String, String>> {
+        if (!context.isPackageInstalled(GameHubTarget.GAMEHUB_LITE_PACKAGE)) return emptyList()
+        return GameHubTarget.FEATURED_GAMES.map { target ->
+            target.title to target.encode()
+        }
+    }
+
+    private fun getStarboardGames(): List<Pair<String, String>> =
+        starboardLibrary.installedGames().map { target -> target.title to target.encode() }
+
+    private fun getPinnedLauncherShortcuts(): List<Pair<String, String>> {
+        val launcherApps = context.getSystemService(LauncherApps::class.java)
+        if (!launcherApps.hasShortcutHostPermission()) return emptyList()
+
+        val query = LauncherApps.ShortcutQuery().setQueryFlags(
+            LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+        )
+        return runCatching {
+            launcherApps.getShortcuts(query, Process.myUserHandle()).orEmpty()
+                .filter { it.isEnabled && !it.intents.isNullOrEmpty() }
+                .map { shortcut ->
+                    shortcut.shortLabel.toString() to AndroidShortcutTarget(
+                        packageName = shortcut.`package`,
+                        shortcutId = shortcut.id,
+                    ).encode()
+                }
+        }.getOrElse { emptyList() }
     }
 
     fun confirmAppPicker(state: LauncherScreen.AppPicker) {
@@ -433,7 +482,12 @@ class SettingsInputHandler @Inject constructor(
             appsRepository.all(appType).forEach { app ->
                 if (app.packageName !in keep) appsRepository.delete(app.id)
             }
-            selected.forEach { (name, pkg) -> appsRepository.upsert(appType, name, pkg) }
+            selected.forEach { (name, pkg) ->
+                val appId = appsRepository.upsert(appType, name, pkg)
+                if (GameHubTarget.decode(pkg) != null || StarboardTarget.decode(pkg) != null) {
+                    appsRepository.updateDisplayName(appId, name)
+                }
+            }
             launcherActions.rescanSystemList()
         }
         nav.pop()

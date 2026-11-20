@@ -81,6 +81,7 @@ class SystemListFghTest {
             cannoliPaths = paths,
             romDirectoryWatcher = mockk(relaxed = true),
             scanScheduler = scheduler,
+            starboardLibrary = mockk(relaxed = true),
         ).also { created.add(it) }
     }
 

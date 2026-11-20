@@ -36,4 +36,5 @@ internal fun testSettingsInputHandler(
     permissionsInputHandler = mockk(relaxed = true),
     coreUpdateController = mockk(relaxed = true),
     shaderUpdateController = mockk(relaxed = true),
+    starboardLibrary = mockk(relaxed = true),
 )

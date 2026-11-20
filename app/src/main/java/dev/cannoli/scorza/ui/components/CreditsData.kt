@@ -10,6 +10,7 @@ val CREDITS_INSPIRATION: List<CreditEntry> = listOf(
     CreditEntry("Hallie", "My beautiful wife who makes me better in every way"),
     CreditEntry("Shaun Inman", "MinUI"),
     CreditEntry("Abraham McCampbell", "Cannoli Logo"),
+    CreditEntry("Kenneth Reitz", "Second Screen"),
 )
 
 val CREDITS_CORES: List<CreditEntry> = listOf(

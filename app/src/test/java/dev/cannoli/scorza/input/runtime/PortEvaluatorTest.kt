@@ -43,6 +43,36 @@ class PortEvaluatorTest {
     }
 
     @Test
+    fun synthetic_trigger_asserts_button_when_mapping_only_has_keycode() {
+        val e = PortEvaluator(
+            template(mapOf(CanonicalButton.BTN_L2 to listOf(InputBinding.Button(104))))
+        )
+
+        val pressed = e.evaluateSyntheticButton(CanonicalButton.BTN_L2, pressed = true)
+        val released = e.evaluateSyntheticButton(CanonicalButton.BTN_L2, pressed = false)
+
+        assertEquals(listOf(CanonicalEvent.Pressed(CanonicalButton.BTN_L2)), pressed)
+        assertEquals(listOf(CanonicalEvent.Released(CanonicalButton.BTN_L2)), released)
+        assertTrue(e.currentlyPressed().isEmpty())
+    }
+
+    @Test
+    fun key_and_synthetic_trigger_sources_release_independently() {
+        val e = PortEvaluator(
+            template(mapOf(CanonicalButton.BTN_R2 to listOf(InputBinding.Button(105))))
+        )
+
+        e.evaluateKeyDown(105, isAndroidRepeat = false)
+        assertTrue(e.evaluateSyntheticButton(CanonicalButton.BTN_R2, pressed = true).isEmpty())
+        assertTrue(e.evaluateKeyUp(105).isEmpty())
+        assertEquals(setOf(CanonicalButton.BTN_R2), e.currentlyPressed())
+        assertEquals(
+            listOf(CanonicalEvent.Released(CanonicalButton.BTN_R2)),
+            e.evaluateSyntheticButton(CanonicalButton.BTN_R2, pressed = false),
+        )
+    }
+
+    @Test
     fun key_down_with_android_repeat_is_filtered() {
         val e = PortEvaluator(
             template(mapOf(CanonicalButton.BTN_SOUTH to listOf(InputBinding.Button(96))))

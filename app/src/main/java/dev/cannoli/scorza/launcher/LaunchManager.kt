@@ -17,12 +17,14 @@ import dev.cannoli.core.SaveSlotStore
 import dev.cannoli.core.config.RetroArchConfigComposer
 import dev.cannoli.core.shader.ShaderIndex
 import dev.cannoli.scorza.model.App
+import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.model.Rom
 import dev.cannoli.scorza.i18n.RetroArchLanguage
 import dev.cannoli.scorza.settings.IgmSettingsMode
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.ui.screens.DialogState
 import dev.cannoli.scorza.util.ArchiveExtractor
+import dev.cannoli.scorza.util.LaunchLog
 import dev.cannoli.scorza.util.parseM3uDiscPaths
 import java.io.File
 import java.io.IOException
@@ -46,6 +48,7 @@ class LaunchManager(
     private val installedCoreService: InstalledCoreService? = null,
     private val gameOverrides: dev.cannoli.scorza.db.GameOverrideStore? = null,
     private val globalOverrides: dev.cannoli.scorza.settings.GlobalOverridesManager? = null,
+    private val activityDisplayRouter: ActivityDisplayRouter? = null,
 ) {
     private fun overrideFor(rom: Rom): dev.cannoli.scorza.config.EmulatorChoice? =
         gameOverrides?.get(rom.id)
@@ -317,10 +320,16 @@ class LaunchManager(
     fun findResumableRoms(roms: List<Rom>): Set<String> {
         val result = mutableSetOf<String>()
         for (rom in roms) {
-            if (!hasSaveState(rom)) continue
-            if (hardcoreInEffect(cheevosFor(rom))) continue
-            if (usesEmbeddedRetroArch(rom)) {
-                result.add(rom.path.absolutePath)
+            // Fork (Recently Played fix): resume badges are optional. A broken override or an
+            // unreadable save must not take down Recently Played, nor imply a different mapping.
+            try {
+                if (!hasSaveState(rom)) continue
+                if (hardcoreInEffect(cheevosFor(rom))) continue
+                if (usesEmbeddedRetroArch(rom)) {
+                    result.add(rom.path.absolutePath)
+                }
+            } catch (e: Exception) {
+                LaunchLog.error("Resume scan skipped rom_id=${rom.id}", e)
             }
         }
         return result
@@ -328,7 +337,10 @@ class LaunchManager(
 
     fun launchRom(rom: Rom): DialogState? {
         debugLog("launchRom entered: ${rom.platformTag} / ${rom.path.name}")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("launchRom ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
         launchState.lastLaunched = rom
         val launchFile = resolveLaunchFile(rom, extractArchives = false)
@@ -413,25 +425,35 @@ class LaunchManager(
             }
         }
 
+        debugLog("launchRom result=${result::class.simpleName}")
         return launchResultDialog(result, rom.platformTag, overrideRomId)
     }
 
     fun launchApp(app: App): DialogState? {
         debugLog("launchApp entered: ${app.type} / ${app.packageName}")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("launchApp ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
-        return launchResultDialog(apkLauncher.launch(app.packageName))
+        return launchResultDialog(
+            apkLauncher.launch(app.packageName),
+            gameSession = app.type == AppType.PORT,
+        )
     }
 
     fun resumeRom(rom: Rom): DialogState? = resumeRom(rom, findMostRecentSlot(rom) ?: 0)
 
     fun resumeRom(rom: Rom, resumeSlot: Int): DialogState? {
         debugLog("resumeRom entered: ${rom.platformTag} / ${rom.path.name} slot=$resumeSlot")
-        if (launchState.launching) return null
+        if (launchState.launching) {
+            debugLog("resumeRom ignored: another launch is still being dispatched")
+            return null
+        }
         launchState.launching = true
         launchState.lastLaunched = rom
         val launchFile = resolveLaunchFile(rom, extractArchives = false)
-            ?: run { launchState.launching = false; launchState.lastLaunched = null; return null }
+            ?: run { launchState.launching = false; launchState.lastLaunched = null; launchState.markGameEnded(); return null }
         val gameOverride = overrideFor(rom)
         if (sourceFor(rom) == EmulatorSource.Standalone) {
             val cfg = gameOverride?.appPackage?.let { platformConfig.getAppConfig(rom.platformTag, it) }
@@ -446,7 +468,7 @@ class LaunchManager(
         }
         val core = gameOverride?.coreId?.ifEmpty { null }
             ?: platformConfig.getCoreName(rom.platformTag)
-            ?: run { launchState.launching = false; launchState.lastLaunched = null; return null }
+            ?: run { launchState.launching = false; launchState.lastLaunched = null; launchState.markGameEnded(); return null }
         if (installedCoreService != null && !coreIsComplete(core, rom.platformTag)) {
             return errorAndReset(DialogState.MissingCore(
                 platformConfig.getCoreDisplayName(core),
@@ -477,6 +499,7 @@ class LaunchManager(
         writeRunnerConfig(File(settings.sdCardRoot))
         val launchConfig = buildGameConfig(rom, core, resume = true, slot = resumeSlot) ?: raConfigPath
         val result = retroArchLauncher.launchRicotta(launchFile, core, launchConfig, buildRicottaIgm(rom))
+        debugLog("resumeRom result=${result::class.simpleName}")
         return launchResultDialog(result, rom.platformTag, rom.id)
     }
 
@@ -512,15 +535,29 @@ class LaunchManager(
     private fun errorAndReset(dialog: DialogState): DialogState {
         launchState.launching = false
         launchState.lastLaunched = null
+        launchState.markGameEnded()
         return dialog
     }
 
-    private fun launchResultDialog(result: LaunchResult, platformTag: String? = null, romId: Long? = null): DialogState? {
+    private fun launchResultDialog(
+        result: LaunchResult,
+        platformTag: String? = null,
+        romId: Long? = null,
+        gameSession: Boolean = true,
+    ): DialogState? {
         val dialog = toLaunchDialog(result, platformTag, romId)
         if (dialog != null) {
             launchState.launching = false
             launchState.lastLaunched = null
+            launchState.markGameEnded()
             return dialog
+        }
+        if (gameSession) launchState.markGameStarted()
+        // Fork (dual-screen): with the launcher and the game on separate displays both stay
+        // resumed, so MainActivity.onResume never releases the guard or clears the overlay.
+        if (activityDisplayRouter?.isDualScreenActive == true) {
+            launchState.launching = false
+            return null
         }
         return DialogState.Launching
     }
@@ -549,6 +586,9 @@ class LaunchManager(
     private var debugSinkRoot: String? = null
 
     private fun debugLog(message: String) {
+        // Always-on launch.log is what makes a dual-screen handoff diagnosable when session
+        // logging is off. The session sink stays for the longer launch_debug.log trail.
+        LaunchLog.write(message)
         if (!dev.cannoli.scorza.util.LoggingPrefs.session) return
         try {
             val root = settings.sdCardRoot

@@ -225,7 +225,8 @@ fun PillRowKeyValue(
     valueIcon: String? = null,
     dotIndicator: Boolean? = null,
     checkState: Boolean? = null,
-    leadingIcon: String? = null
+    leadingIcon: String? = null,
+    enabled: Boolean = true,
 ) {
     val colors = LocalCannoliColors.current
     val baseStyle = MaterialTheme.typography.bodyLarge
@@ -238,10 +239,20 @@ fun PillRowKeyValue(
     }
 
     val scrollState = rememberScrollState()
-    MarqueeEffect(scrollState, isSelected)
+    MarqueeEffect(scrollState, isSelected && enabled)
 
-    val labelColor = if (isSelected) colors.highlightText else colors.text
-    val valueColor = if (isSelected) colors.highlightText else colors.accent
+    val labelColor = when {
+        !enabled && isSelected -> colors.highlightText.copy(alpha = 0.5f)
+        !enabled -> colors.text.copy(alpha = 0.38f)
+        isSelected -> colors.highlightText
+        else -> colors.text
+    }
+    val valueColor = when {
+        !enabled && isSelected -> colors.highlightText.copy(alpha = 0.5f)
+        !enabled -> colors.text.copy(alpha = 0.38f)
+        isSelected -> colors.highlightText
+        else -> colors.accent
+    }
     val borderColor = if (isSelected) colors.highlightText.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.3f)
 
     PillRow(isSelected = isSelected, verticalPadding = verticalPadding, lineHeight = lineHeight, modifier = Modifier.fillMaxWidth()) {

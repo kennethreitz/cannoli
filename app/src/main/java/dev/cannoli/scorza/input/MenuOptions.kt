@@ -21,6 +21,8 @@ internal const val MENU_SAVE_SLOTS = "menu_save_slots"
 internal const val MENU_RESTORE_BACKUP = "menu_restore_backup"
 internal const val MENU_ROMM_SAVES = "menu_romm_saves"
 internal const val MENU_GUIDES = "menu_guides"
+// Fork: upload a local ROM to the paired RomM server.
+internal const val MENU_UPLOAD_TO_ROMM = "menu_upload_to_romm"
 
 internal val MENU_LABELS: Map<String, Int> = mapOf(
     MENU_RENAME to dev.cannoli.ui.R.string.menu_rename,
@@ -44,4 +46,5 @@ internal val MENU_LABELS: Map<String, Int> = mapOf(
     MENU_RESTORE_BACKUP to dev.cannoli.ui.R.string.save_backup_restore,
     MENU_ROMM_SAVES to dev.cannoli.ui.R.string.menu_romm_saves,
     MENU_GUIDES to dev.cannoli.ui.R.string.menu_guides,
+    MENU_UPLOAD_TO_ROMM to dev.cannoli.ui.R.string.menu_upload_to_romm,
 )

@@ -69,14 +69,15 @@ class GameIdMigrationTest {
         conn.close()
     }
 
-    @Test fun `migrating leaves the schema at fifteen`() {
+    // Fork: migration 16 folds the fork's per-slot pending_conflicts table back to v2's schema.
+    @Test fun `migrating leaves the schema at sixteen`() {
         val conn = v13Connection("version")
         Migrations.applyFrom(conn, 13)
         conn.prepare("PRAGMA user_version").use { stmt ->
             stmt.step()
-            assertEquals(15, stmt.getInt(0))
+            assertEquals(16, stmt.getInt(0))
         }
-        assertEquals(15, Migrations.current)
+        assertEquals(16, Migrations.current)
         conn.close()
     }
 }

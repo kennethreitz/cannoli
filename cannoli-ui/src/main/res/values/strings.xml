@@ -143,6 +143,7 @@
     <!-- Appearance setting: shows or hides the title-bar heading text. "Title" here is the heading, not color or box art. -->
     <string name="setting_title">Title</string>
     <string name="setting_bg_image">Background Image</string>
+    <string name="setting_dual_screen_launching">Dual Screen Support</string>
     <string name="setting_wifi" translatable="false">Wi-Fi</string>
     <string name="setting_vpn">VPN</string>
     <string name="setting_bluetooth" translatable="false">Bluetooth</string>
@@ -247,6 +248,7 @@
     <string name="value_video_driver_vulkan">Vulkan</string>
     <!-- Advanced setting toggle: skip the passcode gate for Nonna's Kitchen. Keep "Kitchen" consistent with the feature name. -->
     <string name="setting_kitchen_code_bypass">Kitchen Code Bypass</string>
+    <string name="setting_experimental_features">Experimental Features</string>
     <string name="setting_set_default_launcher">Set as Default Launcher</string>
     <!-- Same row as setting_set_default_launcher, shown when Cannoli is already the default launcher and the user wants to pick another one. -->
     <string name="setting_change_default_launcher">Use a Different Launcher</string>
@@ -335,6 +337,7 @@
     <string name="menu_remove_from_recents">Remove From Recently Played</string>
     <string name="menu_save_slots">Save Slots</string>
     <string name="menu_romm_saves">RomM Saves</string>
+    <string name="menu_upload_to_romm">Upload to RomM</string>
     <string name="menu_guides">Guides</string>
     <string name="setting_installed_cores">Installed Cores</string>
     <!-- Confirm removing one core. %1$s = its name, %2$s = a size like "12 MB". -->
@@ -389,6 +392,10 @@
     <string name="setting_romm_host">Host</string>
     <!-- Toggle: sync save files with the RomM server. -->
     <string name="setting_romm_save_sync">Save Sync</string>
+    <string name="setting_romm_save_sync_interval">Check Every</string>
+    <string name="romm_save_sync_interval_minutes">%1$d min</string>
+    <string name="romm_save_sync_interval_one_hour">1 hr</string>
+    <string name="romm_save_sync_interval_four_hours">4 hrs</string>
     <string name="setting_romm_save_backups">Save Backups</string>
     <string name="dialog_romm_device_name_title">Name this device</string>
     <string name="romm_save_sync_needs_500">Requires RomM 5.0+</string>
@@ -492,6 +499,14 @@
     <string name="romm_disconnect_confirm">Disconnect from RomM?</string>
     <string name="romm_cancel_confirm">Cancel this download?</string>
     <string name="romm_cancel_all_confirm">Cancel all downloads?</string>
+    <string name="romm_upload_confirm">Upload %1$s (%2$s) to RomM?</string>
+    <string name="romm_upload_title">Uploading to RomM</string>
+    <string name="romm_upload_status">%1$s  %2$d%%</string>
+    <string name="romm_upload_success">%1$s was uploaded to RomM successfully.</string>
+    <string name="romm_upload_already_present">%1$s is already present in RomM. The local cache has been refreshed.</string>
+    <string name="romm_upload_cancelled">ROM upload cancelled.</string>
+    <string name="romm_upload_failed">Could not upload %1$s.\n\n%2$s</string>
+    <string name="romm_upload_permission_error">RomM refused the upload. Re-pair Cannoli using an Admin or Editor account with ROM upload permission.</string>
     <string name="romm_art_results_title">Box Art Results</string>
     <string name="romm_art_added">Added art</string>
     <string name="romm_art_already">Already had art</string>

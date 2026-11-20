@@ -29,6 +29,7 @@ import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
 import dev.cannoli.scorza.updater.UpdateManager
 import dev.cannoli.scorza.util.KitchenLog
+import dev.cannoli.scorza.util.LaunchLog
 import dev.cannoli.scorza.util.ScanLog
 import dev.cannoli.scorza.util.StorageLog
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +99,8 @@ class BootInitializer @Inject constructor(
         dev.cannoli.scorza.util.RommLog.init(root.absolutePath)
         dev.cannoli.scorza.util.ErrorLog.init(root.absolutePath)
         withContext(Dispatchers.IO) { dev.cannoli.scorza.download.DownloadStaging.sweepOnce(root) }
+        LaunchLog.init(root.absolutePath)
+        LaunchLog.write("logger initialized app=${context.packageName} root=${root.absolutePath}")
         setupCoordinator.logStorageDiagnostics()
         platformConfig.load()
         platformConfig.seedUnsetPlatforms(context.packageManager)

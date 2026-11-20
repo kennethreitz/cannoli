@@ -48,6 +48,7 @@ class FghLibrarySettingsTest {
             context = ctx,
             rommStore = mockk(relaxed = true),
             pathsProvider = mockk(relaxed = true),
+            activityDisplayRouter = mockk(relaxed = true),
         )
         vm.load()
         vm.reinitialize(ctx.packageManager, ctx.packageName, collections)

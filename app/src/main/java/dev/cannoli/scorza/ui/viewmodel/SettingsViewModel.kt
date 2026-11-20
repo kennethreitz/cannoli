@@ -9,6 +9,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.scopes.ActivityScoped
 import dev.cannoli.scorza.R
 import dev.cannoli.scorza.db.CollectionsRepository
+import dev.cannoli.scorza.launcher.InstalledCoreService
+import dev.cannoli.scorza.launcher.ActivityDisplayRouter
 import dev.cannoli.scorza.model.CollectionType
 import dev.cannoli.scorza.settings.ArtScale
 import dev.cannoli.scorza.settings.BatteryDisplay
@@ -31,6 +33,7 @@ import dev.cannoli.scorza.updater.ReleaseChannel
 @ActivityScoped
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
+    private val activityDisplayRouter: ActivityDisplayRouter,
     private val appFonts: AppFonts,
     @ApplicationContext private val context: Context,
     private val rommStore: dev.cannoli.scorza.romm.RommConnectionStore,
@@ -241,6 +244,7 @@ class SettingsViewModel @Inject constructor(
         val colorBackground: String,
         val colorStatusBar: String,
         val swapPlayResume: Boolean,
+        val dualScreenLaunching: Boolean,
         val showWifi: Boolean,
         val showBluetooth: Boolean,
         val showVpn: Boolean,
@@ -483,6 +487,12 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             SettingsKey.SWAP_PLAY_RESUME -> settings.swapPlayResume = !settings.swapPlayResume
+            SettingsKey.EXPERIMENTAL_FEATURES -> settings.experimentalFeatures = !settings.experimentalFeatures
+            SettingsKey.DUAL_SCREEN_LAUNCHING -> {
+                if (activityDisplayRouter.isDualScreenAvailable || settings.dualScreenLaunching) {
+                    settings.dualScreenLaunching = !settings.dualScreenLaunching
+                }
+            }
             SettingsKey.CONTENT_MODE -> {
                 val entries = ContentMode.entries
                 val cur = entries.indexOf(settings.contentMode).coerceAtLeast(0)
@@ -683,6 +693,7 @@ class SettingsViewModel @Inject constructor(
         colorBackground = settings.colorBackground,
         colorStatusBar = settings.colorStatusBar,
         swapPlayResume = settings.swapPlayResume,
+        dualScreenLaunching = settings.dualScreenLaunching,
         showWifi = settings.showWifi,
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
@@ -723,6 +734,7 @@ class SettingsViewModel @Inject constructor(
         settings.colorBackground = snap.colorBackground
         settings.colorStatusBar = snap.colorStatusBar
         settings.swapPlayResume = snap.swapPlayResume
+        settings.dualScreenLaunching = snap.dualScreenLaunching
         settings.showWifi = snap.showWifi
         settings.showBluetooth = snap.showBluetooth
         settings.showVpn = snap.showVpn
@@ -1007,6 +1019,16 @@ class SettingsViewModel @Inject constructor(
             add(SettingsItem(SettingsKey.REGENERATE_SYSTEM_FOLDERS.id, R.string.setting_regenerate_system_folders, isEditable = true))
             add(SettingsItem(SettingsKey.RESET_CUSTOM_CONFIG.id, R.string.setting_reset_custom_config, isEditable = true))
             add(SettingsItem(SettingsKey.KITCHEN_CODE_BYPASS.id, R.string.setting_kitchen_code_bypass, valueRes = onOff(settings.kitchenCodeBypass)))
+            // Fork: Second Screen / dual-screen launching sits behind the experimental opt-in.
+            add(SettingsItem(SettingsKey.EXPERIMENTAL_FEATURES.id, R.string.setting_experimental_features, valueRes = onOff(settings.experimentalFeatures)))
+            if (settings.experimentalFeatures) {
+                add(SettingsItem(
+                    SettingsKey.DUAL_SCREEN_LAUNCHING.id,
+                    R.string.setting_dual_screen_launching,
+                    valueRes = onOff(settings.dualScreenLaunching),
+                    disabled = !activityDisplayRouter.isDualScreenAvailable && !settings.dualScreenLaunching,
+                ))
+            }
             add(SettingsItem(
                 SettingsKey.RELEASE_CHANNEL.id,
                 R.string.settings_release_channel,

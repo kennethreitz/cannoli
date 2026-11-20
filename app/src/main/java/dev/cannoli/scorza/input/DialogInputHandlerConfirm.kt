@@ -236,6 +236,9 @@ internal fun DialogInputHandler.confirmDialog(): Boolean {
         is DialogState.SaveBackupRestoreConfirm -> doRestore(ds)
         is DialogState.RommConfirm -> onRommConfirm(ds)
         is DialogState.Picker -> ds.onSelect(ds.selectedIndex)
+        is DialogState.RommUploadConfirm -> confirmRommUpload(ds)
+        is DialogState.RommUploadProgress -> {}
+        is DialogState.RommUploadResult -> dismissRommUploadResult(ds)
         is DialogState.RAPreloadResult -> {
             if (pendingContextReturn != null) restoreContextMenu()
             else nav.dialogState.value = DialogState.None

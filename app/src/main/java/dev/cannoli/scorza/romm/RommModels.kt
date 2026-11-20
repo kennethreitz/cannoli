@@ -77,6 +77,7 @@ data class RommNetworkCollection(
     val romIds: List<Int>,
     val romCount: Int,
     val virtualType: String? = null,
+    val isFavorite: Boolean = false,
 )
 
 data class RommCollection(

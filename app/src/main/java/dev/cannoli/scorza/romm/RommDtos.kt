@@ -99,6 +99,11 @@ data class RomsPageDto(
 )
 
 @Serializable
+data class RommUploadStartDto(
+    @SerialName("upload_id") val uploadId: String,
+)
+
+@Serializable
 data class FirmwareDto(
     val id: Int,
     @SerialName("file_name") val fileName: String,
@@ -114,6 +119,12 @@ data class CollectionDto(
     val name: String = "",
     @SerialName("rom_ids") val romIds: List<Int> = emptyList(),
     @SerialName("rom_count") val romCount: Int = 0,
+    @SerialName("is_favorite") val isFavorite: Boolean = false,
+)
+
+@Serializable
+data class CollectionRomsPayload(
+    @SerialName("rom_ids") val romIds: List<Int>,
 )
 
 @Serializable

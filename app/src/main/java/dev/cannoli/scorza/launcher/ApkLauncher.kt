@@ -1,9 +1,11 @@
 package dev.cannoli.scorza.launcher
 
-import android.app.ActivityOptions
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.os.Process
 import android.os.StrictMode
 import android.provider.Settings
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,15 +18,29 @@ import javax.inject.Singleton
 @Singleton
 class ApkLauncher @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val activityDisplayRouter: ActivityDisplayRouter,
 ) {
 
     var debugLog: (String) -> Unit = {}
 
     companion object {
         const val VIRTUAL_TV_SETTINGS_PACKAGE = "cannoli.virtual.tv_settings"
+        private const val GAMEHUB_DETAIL_ACTIVITY =
+            "com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity"
+        private const val STARBOARD_GAME_ACTIVITY =
+            "org.force9.starboard.ui.game.GameActivity"
     }
 
     fun launch(packageName: String): LaunchResult {
+        GameHubTarget.decode(packageName)?.let { game ->
+            return launchGameHub(game)
+        }
+        StarboardTarget.decode(packageName)?.let { game ->
+            return launchStarboard(game)
+        }
+        AndroidShortcutTarget.decode(packageName)?.let { shortcut ->
+            return launchShortcut(shortcut)
+        }
         val intent = if (packageName == VIRTUAL_TV_SETTINGS_PACKAGE) {
             Intent(Settings.ACTION_SETTINGS)
         } else {
@@ -34,7 +50,79 @@ class ApkLauncher @Inject constructor(
 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-        return context.startActivityNoAnim(intent, "Failed to launch app")
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch app",
+            activityDisplayRouter.gameLaunchDisplayId(),
+        )
+    }
+
+    private fun launchGameHub(target: GameHubTarget): LaunchResult {
+        if (!context.isPackageInstalled(target.packageName)) {
+            return LaunchResult.AppNotInstalled(target.packageName)
+        }
+        val intent = Intent().apply {
+            component = ComponentName(target.packageName, GAMEHUB_DETAIL_ACTIVITY)
+            putExtra("autoStartGame", true)
+            putExtra("steamAppId", target.steamAppId)
+            putExtra("id", "0")
+            putExtra("type", "1")
+            putExtra("gameType", "0")
+            putExtra("localGameId", "")
+            putExtra("localMobileAppId", "")
+            putExtra("localAppName", target.title)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch GameHub game",
+            activityDisplayRouter.gameLaunchDisplayId(),
+            logLabel = "gamehub",
+        )
+    }
+
+    private fun launchStarboard(target: StarboardTarget): LaunchResult {
+        if (!context.isPackageInstalled(target.packageName)) {
+            return LaunchResult.AppNotInstalled(target.packageName)
+        }
+        val intent = Intent().apply {
+            component = ComponentName(target.packageName, STARBOARD_GAME_ACTIVITY)
+            putExtra("zip_name", target.zipName)
+            putExtra("launcher", target.launcher)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch Starboard game",
+            activityDisplayRouter.gameLaunchDisplayId(),
+            logLabel = "starboard",
+        )
+    }
+
+    private fun launchShortcut(target: AndroidShortcutTarget): LaunchResult {
+        if (!context.isPackageInstalled(target.packageName)) {
+            return LaunchResult.AppNotInstalled(target.packageName)
+        }
+        val launcherApps = context.getSystemService(LauncherApps::class.java)
+        if (!launcherApps.hasShortcutHostPermission()) {
+            return LaunchResult.Error("Cannoli does not have access to Android shortcuts")
+        }
+        val query = LauncherApps.ShortcutQuery()
+            .setPackage(target.packageName)
+            .setShortcutIds(listOf(target.shortcutId))
+            .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        val shortcut = runCatching {
+            launcherApps.getShortcuts(query, Process.myUserHandle()).orEmpty().firstOrNull()
+        }.getOrNull() ?: return LaunchResult.Error("Android shortcut is no longer available")
+        val intent = shortcut.intents.orEmpty().lastOrNull()
+            ?: return LaunchResult.Error("Android shortcut has no launch intent")
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return context.startActivityNoAnim(
+            intent,
+            "Failed to launch shortcut",
+            activityDisplayRouter.gameLaunchDisplayId(),
+            logLabel = "shortcut",
+        )
     }
 
     fun launchWithRom(packageName: String, romFile: File, config: AppConfig): LaunchResult {
@@ -73,22 +161,24 @@ class ApkLauncher @Inject constructor(
             logExposedActivities(packageName)
             return launchViewWithFileProvider(packageName, romFile)
         }
-        val opts = ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
+        // v2: a file:// data uri trips StrictMode's FileUriExposed check, so relax it for the launch.
         val previousVmPolicy = if (resolved.dataUri?.scheme == "file") {
             val current = StrictMode.getVmPolicy()
             StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
             current
         } else null
-        return try {
-            context.startActivity(intent, opts)
-            debugLog("  -> startActivity succeeded")
-            LaunchResult.Success
-        } catch (e: Exception) {
-            debugLog("  -> startActivity failed: ${e.javaClass.simpleName}: ${e.message}")
-            LaunchResult.Error(e.message ?: "Failed to launch emulator")
+        val result = try {
+            context.startActivityNoAnim(
+                intent,
+                "Failed to launch emulator",
+                activityDisplayRouter.gameLaunchDisplayId(),
+                logLabel = "emulator",
+            )
         } finally {
             previousVmPolicy?.let { StrictMode.setVmPolicy(it) }
         }
+        debugLog("  -> dispatch result=${result::class.simpleName}")
+        return result
     }
 
     private fun logExposedActivities(packageName: String) {
@@ -116,25 +206,22 @@ class ApkLauncher @Inject constructor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        val opts = ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
-        return try {
-            context.startActivity(viewIntent, opts)
-            debugLog("  -> FileProvider VIEW startActivity succeeded")
-            LaunchResult.Success
-        } catch (_: Exception) {
-            debugLog("  -> FileProvider VIEW failed, retrying via getLaunchIntentForPackage")
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-                ?: return LaunchResult.Error("No launch activity for $packageName")
-            launchIntent.apply {
+        val targetIntent = if (
+            context.packageManager.resolveActivity(viewIntent, PackageManager.MATCH_DEFAULT_ONLY) != null
+        ) {
+            viewIntent
+        } else {
+            debugLog("  -> FileProvider VIEW unresolved, using package launch intent")
+            context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
                 data = uri
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            try {
-                context.startActivity(launchIntent, opts)
-                LaunchResult.Success
-            } catch (e: Exception) {
-                LaunchResult.Error(e.message ?: "Failed to launch emulator")
-            }
+            } ?: return LaunchResult.Error("No launch activity for $packageName")
         }
+        return context.startActivityNoAnim(
+            targetIntent,
+            "Failed to launch emulator",
+            activityDisplayRouter.gameLaunchDisplayId(),
+            logLabel = "emulator-fallback",
+        )
     }
 }

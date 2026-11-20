@@ -32,12 +32,14 @@ enum class RommSettingsRow(@androidx.annotation.StringRes val labelRes: Int, val
 }
 
 enum class RommSaveSyncRow {
-    TOGGLE, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
+    TOGGLE, INTERVAL, BACKUPS, HISTORY, CONFLICTS, ERRORS, RESTORE;
     companion object {
         fun visibleRows(supported: Boolean, enabled: Boolean, pendingConflicts: Int, syncErrors: Int, hasBackups: Boolean): List<RommSaveSyncRow> =
             buildList {
                 add(TOGGLE)
                 if (supported && enabled) {
+                    // Fork: configurable background poll interval (Settings > RomM > Save Sync).
+                    add(INTERVAL)
                     add(BACKUPS)
                     add(HISTORY)
                     if (pendingConflicts > 0) add(CONFLICTS)

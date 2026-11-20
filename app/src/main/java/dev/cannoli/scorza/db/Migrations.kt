@@ -261,6 +261,41 @@ internal object Migrations {
                 db.execSQL("ALTER TABLE roms ADD COLUMN ra_hardcore INTEGER")
             }
         },
+        // Fork (Kenneth): the old fork's save-state sync rebuilt pending_conflicts with a per-slot
+        // key under its own v13 (v2's v13 is ra_hardcore, which v15 re-checks). v2's save engine
+        // keeps one row per game, so fold such a table back, keeping each game's autosave row.
+        Migration(16) { db ->
+            if (!hasColumn(db, "pending_conflicts", "slot")) return@Migration
+            db.execSQL(
+                """
+                CREATE TABLE pending_conflicts_v16 (
+                    game_key TEXT PRIMARY KEY,
+                    rom_id INTEGER NOT NULL,
+                    display_name TEXT NOT NULL,
+                    server_save_id INTEGER,
+                    server_content_hash TEXT,
+                    server_updated_at TEXT,
+                    detected_at INTEGER NOT NULL,
+                    dismissed_hash TEXT
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT OR IGNORE INTO pending_conflicts_v16 (
+                    game_key, rom_id, display_name, server_save_id,
+                    server_content_hash, server_updated_at, detected_at, dismissed_hash
+                )
+                SELECT
+                    game_key, rom_id, display_name, server_save_id,
+                    server_content_hash, server_updated_at, detected_at, dismissed_hash
+                FROM pending_conflicts
+                ORDER BY CASE WHEN slot = 'autosave' THEN 0 ELSE 1 END, detected_at DESC
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE pending_conflicts")
+            db.execSQL("ALTER TABLE pending_conflicts_v16 RENAME TO pending_conflicts")
+        },
     )
 
     private fun hasColumn(db: SQLiteConnection, table: String, column: String): Boolean =
@@ -270,6 +305,39 @@ internal object Migrations {
             }
             false
         }
+
+    /**
+     * Experimental builds used the same user_version values for different migrations.
+     * In particular, v12 once only migrated pending_conflicts; those installs can be
+     * stamped v13 but still have the runner-based override schema. Check the actual
+     * schema on every open, independently of the migration version, without dropping
+     * rows or resetting the version (which could rerun unrelated migrations).
+     */
+    fun repairGameOverrideSource(db: SQLiteConnection): Boolean {
+        val columns = db.queryAll("PRAGMA table_info(game_overrides)") { it.getText(1) }
+        if ("source" in columns) return false
+        check("rom_id" in columns) { "game_overrides table is missing" }
+        val runner = if ("runner" in columns) "runner" else "NULL"
+        db.execSQL("BEGIN IMMEDIATE")
+        try {
+            db.execSQL("ALTER TABLE game_overrides ADD COLUMN source TEXT NOT NULL DEFAULT 'Embedded'")
+            // Map legacy runner captions straight onto v2's EmulatorSource names (the built-in
+            // RetroArch is Embedded; v2 has no external RetroArch runner), leaving legacy columns intact.
+            db.execSQL("""
+                UPDATE game_overrides SET source = CASE
+                    WHEN $runner IN ('Standalone', 'App') THEN 'Standalone'
+                    WHEN $runner IS NOT NULL AND $runner <> '' THEN 'Embedded'
+                    WHEN app_package IS NOT NULL THEN 'Standalone'
+                    ELSE 'Embedded'
+                END
+            """.trimIndent())
+            db.execSQL("COMMIT")
+        } catch (t: Throwable) {
+            db.execSQL("ROLLBACK")
+            throw t
+        }
+        return true
+    }
 
     val current: Int = all.maxOf { it.version }
 

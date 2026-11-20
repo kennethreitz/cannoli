@@ -51,6 +51,7 @@ class QuickMenuBackNavigationTest {
             context = ApplicationProvider.getApplicationContext(),
             rommStore = mockk(relaxed = true),
             pathsProvider = CannoliPathsProvider(settings),
+            activityDisplayRouter = mockk(relaxed = true),
         )
         dialogHandler = testDialogInputHandler(
             nav = nav,

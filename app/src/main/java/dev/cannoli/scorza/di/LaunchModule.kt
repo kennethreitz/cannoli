@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.cannoli.scorza.config.PlatformConfig
 import dev.cannoli.scorza.config.CannoliPaths
 import dev.cannoli.scorza.db.RomsRepository
+import dev.cannoli.scorza.launcher.ActivityDisplayRouter
 import dev.cannoli.scorza.launcher.ApkLauncher
 import dev.cannoli.scorza.launcher.CheevosOverrideMigration
 import dev.cannoli.scorza.launcher.DelfinoLauncher
@@ -27,7 +28,8 @@ object LaunchModule {
     @Provides @Singleton
     fun provideRetroArchLauncher(
         @ApplicationContext context: Context,
-    ): RetroArchLauncher = RetroArchLauncher(context)
+        activityDisplayRouter: ActivityDisplayRouter,
+    ): RetroArchLauncher = RetroArchLauncher(context, activityDisplayRouter)
 
     @Provides @Singleton
     fun provideDelfinoLauncher(
@@ -64,9 +66,11 @@ object LaunchModule {
         installedCoreService: InstalledCoreService,
         gameOverrides: dev.cannoli.scorza.db.GameOverrideStore,
         globalOverrides: dev.cannoli.scorza.settings.GlobalOverridesManager,
+        activityDisplayRouter: ActivityDisplayRouter,
     ): LaunchManager = LaunchManager(
         context, settings, platformConfig,
         retroArchLauncher, apkLauncher, delfinoLauncher, launchState, activeMappingHolder,
-        installedCoreService, gameOverrides, globalOverrides
+        installedCoreService, gameOverrides, globalOverrides,
+        activityDisplayRouter = activityDisplayRouter,
     )
 }
